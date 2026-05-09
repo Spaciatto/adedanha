@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: ./adedanha-golang
+      dockerfile: Dockerfile
+    container_name: adedanha-backend
+    volumes:
+      - sqlite-data:/app/data
+    restart: unless-stopped
+    networks:
+      - adedanha-net
+
+  frontend:
+    build:
+      context: ./adedanha-react
+      dockerfile: Dockerfile
+    container_name: adedanha-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - adedanha-net
+
+volumes:
+  sqlite-data:
+
+networks:
+  adedanha-net:
+    driver: bridge
