@@ -240,7 +240,7 @@ function App() {
 
   if (!user) {
     return (
-      <BrowserRouter>
+      <BrowserRouter basename="/adedanha">
         <div className="container">
           <h1>🎲 Adedanha Online</h1>
           <Login onLogin={handleLogin} />
@@ -250,7 +250,7 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/adedanha">
       <AppContent user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />
     </BrowserRouter>
   );
