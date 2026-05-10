@@ -38,6 +38,7 @@ func createTables() {
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		email TEXT UNIQUE NOT NULL,
+		avatar TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 

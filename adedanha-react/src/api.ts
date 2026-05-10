@@ -39,6 +39,12 @@ export const api = {
   getUser: (id: string) =>
     request(`/api/users/${id}`),
 
+  uploadAvatar: (userId: string, avatar: string) =>
+    request(`/api/users/${userId}/avatar`, {
+      method: 'POST',
+      body: JSON.stringify({ avatar }),
+    }),
+
   leaveAllMatches: (userId: string) =>
     request(`/api/users/${userId}/leave-all`, {
       method: 'POST',

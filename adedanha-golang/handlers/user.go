@@ -45,7 +45,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := database.DB.Exec(
-		"INSERT INTO users (id, name, email, created_at) VALUES (?, ?, ?, ?)",
+		"INSERT INTO users (id, name, email, avatar, created_at) VALUES (?, ?, ?, '', ?)",
 		user.ID, user.Name, user.Email, user.CreatedAt,
 	)
 	if err != nil {
@@ -94,8 +94,8 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user models.User
-	err = database.DB.QueryRow("SELECT id, name, email, created_at FROM users WHERE id = ?", userID).
-		Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+	err = database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = ?", userID).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to retrieve updated user"}`, http.StatusInternalServerError)
 		return
@@ -110,8 +110,8 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 	userID := vars["id"]
 
 	var user models.User
-	err := database.DB.QueryRow("SELECT id, name, email, created_at FROM users WHERE id = ?", userID).
-		Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = ?", userID).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
 		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
 		return
@@ -177,8 +177,8 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user models.User
-	err := database.DB.QueryRow("SELECT id, name, email, created_at FROM users WHERE email = ?", req.Email).
-		Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE email = ?", req.Email).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
 		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
 		return
@@ -410,4 +410,44 @@ func GetActiveMatch(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"match_id": matchID})
+}
+
+// UploadAvatar handles avatar image upload (base64 encoded)
+func UploadAvatar(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	userID := vars["id"]
+
+	var reqBody struct {
+		Avatar string `json:"avatar"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+
+	if reqBody.Avatar == "" {
+		http.Error(w, `{"error":"Avatar data is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Limit avatar size to ~500KB base64 (roughly 375KB image)
+	if len(reqBody.Avatar) > 500000 {
+		http.Error(w, `{"error":"Imagem muito grande. Máximo 500KB."}`, http.StatusBadRequest)
+		return
+	}
+
+	result, err := database.DB.Exec("UPDATE users SET avatar = ? WHERE id = ?", reqBody.Avatar, userID)
+	if err != nil {
+		http.Error(w, `{"error":"Failed to update avatar"}`, http.StatusInternalServerError)
+		return
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "Avatar updated successfully"})
 }

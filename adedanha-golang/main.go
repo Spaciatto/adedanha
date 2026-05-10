@@ -58,6 +58,7 @@ func main() {
 	r.HandleFunc("/api/users", handlers.CreateUser).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/users/{id}", handlers.UpdateUser).Methods("PUT", "OPTIONS")
 	r.HandleFunc("/api/users/{id}", handlers.GetUser).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/users/{id}/avatar", handlers.UploadAvatar).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/users/{id}/leave-all", handlers.LeaveAllMatches).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/users/{id}/active-match", handlers.GetActiveMatch).Methods("GET", "OPTIONS")
 	r.HandleFunc("/api/online-users", handlers.GetOnlineUsers).Methods("GET", "OPTIONS")
