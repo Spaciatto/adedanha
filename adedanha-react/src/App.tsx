@@ -179,7 +179,10 @@ function AppContent({ user, onLogout, onUserUpdate }: { user: User; onLogout: ()
     <div className="container">
       <h1>🎲 Adedanha Online</h1>
       <div className="nav-bar">
-        <span className="user-info">Olá, {user.name}!</span>
+        <span className="user-info">
+          {user.avatar && <img src={user.avatar} alt="" className="avatar-small" />}
+          Olá, {user.name}!
+        </span>
         <div className="flex-row">
           <button className="secondary" onClick={handleLogout}>Sair</button>
         </div>
