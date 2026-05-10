@@ -25,23 +25,29 @@ type Client struct {
 	UserID  string
 	Conn    *websocket.Conn
 	Send    chan []byte
+	closed  bool
+	mu      sync.Mutex
+}
+
+// SafeClose safely closes the Send channel only once
+func (c *Client) SafeClose() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		close(c.Send)
+	}
 }
 
 // Hub maintains the set of active clients and broadcasts messages
 type Hub struct {
-	// Registered clients grouped by match ID
-	Matches map[string]map[*Client]bool
-	// Global presence clients (not in a specific match)
-	GlobalClients map[*Client]bool
-	// Register requests from clients
-	Register chan *Client
-	// Unregister requests from clients
-	Unregister chan *Client
-	// Global register/unregister
+	Matches          map[string]map[*Client]bool
+	GlobalClients    map[*Client]bool
+	Register         chan *Client
+	Unregister       chan *Client
 	GlobalRegister   chan *Client
 	GlobalUnregister chan *Client
-	// Mutex for thread-safe access
-	mu sync.RWMutex
+	mu               sync.RWMutex
 }
 
 var GameHub *Hub
@@ -74,7 +80,7 @@ func (h *Hub) Run() {
 			if clients, ok := h.Matches[client.MatchID]; ok {
 				if _, ok := clients[client]; ok {
 					delete(clients, client)
-					close(client.Send)
+					client.SafeClose()
 					if len(clients) == 0 {
 						delete(h.Matches, client.MatchID)
 					}
@@ -93,7 +99,7 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			if _, ok := h.GlobalClients[client]; ok {
 				delete(h.GlobalClients, client)
-				close(client.Send)
+				client.SafeClose()
 			}
 			h.mu.Unlock()
 			log.Printf("Client %s disconnected globally", client.UserID)
@@ -112,8 +118,6 @@ func (h *Hub) GetOnlineUserIDs() []string {
 			userSet[client.UserID] = true
 		}
 	}
-
-	// Also check the global presence connections
 	for client := range h.GlobalClients {
 		userSet[client.UserID] = true
 	}
@@ -139,29 +143,38 @@ func BroadcastToMatch(matchID string, message models.WSMessage) {
 
 	GameHub.mu.RLock()
 	clients, ok := GameHub.Matches[matchID]
-	GameHub.mu.RUnlock()
-
 	if !ok {
+		GameHub.mu.RUnlock()
 		return
 	}
 
-	GameHub.mu.RLock()
+	// Collect clients to remove
+	var toRemove []*Client
 	for client := range clients {
 		select {
 		case client.Send <- data:
 		default:
-			GameHub.mu.RUnlock()
-			GameHub.mu.Lock()
-			delete(clients, client)
-			close(client.Send)
-			GameHub.mu.Unlock()
-			GameHub.mu.RLock()
+			toRemove = append(toRemove, client)
 		}
 	}
 	GameHub.mu.RUnlock()
+
+	// Remove dead clients outside the read lock
+	if len(toRemove) > 0 {
+		GameHub.mu.Lock()
+		for _, client := range toRemove {
+			if clients, ok := GameHub.Matches[matchID]; ok {
+				if _, ok := clients[client]; ok {
+					delete(clients, client)
+					client.SafeClose()
+				}
+			}
+		}
+		GameHub.mu.Unlock()
+	}
 }
 
-// BroadcastToGlobal sends a message to all global presence clients
+// BroadcastToGlobal sends a message to global presence clients
 func BroadcastToGlobal(message models.WSMessage) {
 	if GameHub == nil {
 		return
@@ -177,14 +190,13 @@ func BroadcastToGlobal(message models.WSMessage) {
 	defer GameHub.mu.RUnlock()
 
 	for client := range GameHub.GlobalClients {
-		// Only send to the target user if UserID is specified
 		if message.UserID != "" && client.UserID != message.UserID {
 			continue
 		}
 		select {
 		case client.Send <- data:
 		default:
-			// Skip if buffer is full
+			// Skip if buffer is full — don't remove under read lock
 		}
 	}
 }
@@ -215,7 +227,6 @@ func HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	GameHub.Register <- client
 
-	// Start goroutines for reading and writing
 	go client.writePump()
 	go client.readPump()
 }
@@ -235,8 +246,7 @@ func (c *Client) writePump() {
 				return
 			}
 			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			err := c.Conn.WriteMessage(websocket.TextMessage, message)
-			if err != nil {
+			if err := c.Conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 		case <-pingTicker.C:
@@ -272,7 +282,6 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		// Reset read deadline on any message
 		c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	}
 }

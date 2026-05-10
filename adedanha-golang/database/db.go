@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"log"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -11,16 +12,20 @@ var DB *sql.DB
 
 func InitDB(dataSourceName string) {
 	var err error
-	DB, err = sql.Open("sqlite3", dataSourceName)
+	DB, err = sql.Open("sqlite3", dataSourceName+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
+
+	// SQLite supports concurrent reads but only one writer at a time
+	DB.SetMaxOpenConns(10)
+	DB.SetMaxIdleConns(5)
+	DB.SetConnMaxLifetime(time.Hour)
 
 	if err = DB.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 
-	DB.Exec("PRAGMA journal_mode=WAL;")
 	DB.Exec("PRAGMA foreign_keys=ON;")
 
 	createTables()
@@ -111,4 +116,40 @@ func createTables() {
 	if err != nil {
 		log.Fatalf("Failed to create tables: %v", err)
 	}
+}
+
+// Cleanup removes old finished matches and expired data
+func Cleanup() {
+	// Remove finished matches older than 24 hours and their related data
+	cutoff := time.Now().Add(-24 * time.Hour)
+
+	// Get old match IDs
+	rows, err := DB.Query("SELECT id FROM matches WHERE status = 'finished' AND created_at < ?", cutoff)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var matchIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			matchIDs = append(matchIDs, id)
+		}
+	}
+
+	for _, matchID := range matchIDs {
+		DB.Exec("DELETE FROM answers WHERE round_id IN (SELECT id FROM rounds WHERE match_id = ?)", matchID)
+		DB.Exec("DELETE FROM rounds WHERE match_id = ?", matchID)
+		DB.Exec("DELETE FROM match_players WHERE match_id = ?", matchID)
+		DB.Exec("DELETE FROM join_requests WHERE match_id = ?", matchID)
+		DB.Exec("DELETE FROM invites WHERE match_id = ?", matchID)
+		DB.Exec("DELETE FROM matches WHERE id = ?", matchID)
+	}
+
+	// Remove expired/rejected invites older than 1 hour
+	DB.Exec("DELETE FROM invites WHERE status != 'pending' AND created_at < ?", time.Now().Add(-1*time.Hour))
+
+	// Remove processed join requests older than 1 hour
+	DB.Exec("DELETE FROM join_requests WHERE status != 'pending' AND created_at < ?", time.Now().Add(-1*time.Hour))
 }

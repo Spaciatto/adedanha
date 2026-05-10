@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"regexp"
 	"time"
 
 	"adedanha-golang/database"
@@ -11,6 +13,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
+
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+func isValidEmail(email string) bool {
+	return emailRegex.MatchString(email)
+}
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateUserRequest
@@ -21,6 +29,11 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	if req.Name == "" || req.Email == "" {
 		http.Error(w, `{"error":"Name and email are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(req.Email) {
+		http.Error(w, `{"error":"Invalid email format"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -60,12 +73,17 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !isValidEmail(req.Email) {
+		http.Error(w, `{"error":"Invalid email format"}`, http.StatusBadRequest)
+		return
+	}
+
 	result, err := database.DB.Exec(
 		"UPDATE users SET name = ?, email = ? WHERE id = ?",
 		req.Name, req.Email, userID,
 	)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to update user"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Failed to update user. Email may already be in use."}`, http.StatusConflict)
 		return
 	}
 
@@ -103,7 +121,6 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(user)
 }
 
-// GetOnlineUsers returns users that currently have an active WebSocket connection
 func GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 	onlineUserIDs := GameHub.GetOnlineUserIDs()
 
@@ -113,7 +130,6 @@ func GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build query with placeholders
 	placeholders := ""
 	args := make([]interface{}, len(onlineUserIDs))
 	for i, id := range onlineUserIDs {
@@ -146,7 +162,6 @@ func GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
-// LoginUser handles login by email - returns existing user or error
 func LoginUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -173,7 +188,6 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(user)
 }
 
-// GetAvailablePlayers returns online users that are NOT in any active match
 func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 	onlineUserIDs := GameHub.GetOnlineUserIDs()
 
@@ -183,7 +197,6 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build query with placeholders
 	placeholders := ""
 	args := make([]interface{}, len(onlineUserIDs))
 	for i, id := range onlineUserIDs {
@@ -194,7 +207,6 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 		args[i] = id
 	}
 
-	// Get online users who are NOT in any active match
 	rows, err := database.DB.Query(`
 		SELECT id, name FROM users 
 		WHERE id IN (`+placeholders+`)
@@ -223,7 +235,6 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(users)
 }
 
-// GetPendingInvites returns pending invites for a user (polling fallback for mobile)
 func GetPendingInvites(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["userId"]
@@ -259,7 +270,6 @@ func GetPendingInvites(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(invites)
 }
 
-// RespondInvite handles accept/reject of an invite
 func RespondInvite(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	inviteID := vars["inviteId"]
@@ -273,7 +283,6 @@ func RespondInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get invite
 	var matchID, targetUserID string
 	err := database.DB.QueryRow(
 		"SELECT match_id, target_user_id FROM invites WHERE id = ? AND status = 'pending'",
@@ -290,18 +299,25 @@ func RespondInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if reqBody.Accepted {
-		database.DB.Exec("UPDATE invites SET status = 'accepted' WHERE id = ?", inviteID)
+		if _, err := database.DB.Exec("UPDATE invites SET status = 'accepted' WHERE id = ?", inviteID); err != nil {
+			log.Printf("Error updating invite status: %v", err)
+		}
 
-		// Add player to match
 		var userName string
-		database.DB.QueryRow("SELECT name FROM users WHERE id = ?", reqBody.UserID).Scan(&userName)
+		if err := database.DB.QueryRow("SELECT name FROM users WHERE id = ?", reqBody.UserID).Scan(&userName); err != nil {
+			http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+			return
+		}
 
-		database.DB.Exec(
+		_, err := database.DB.Exec(
 			"INSERT OR IGNORE INTO match_players (match_id, user_id, active, joined_at) VALUES (?, ?, 1, ?)",
 			matchID, reqBody.UserID, time.Now(),
 		)
+		if err != nil {
+			http.Error(w, `{"error":"Failed to join match"}`, http.StatusInternalServerError)
+			return
+		}
 
-		// Broadcast player_joined
 		BroadcastToMatch(matchID, models.WSMessage{
 			Type:     "player_joined",
 			UserID:   reqBody.UserID,
@@ -317,12 +333,11 @@ func RespondInvite(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// LeaveAllMatches removes the user from all active matches (used on logout)
 func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["id"]
 
-	// Get all active matches where user is a non-creator active player
+	// Get matches where user is active non-creator player
 	rows, err := database.DB.Query(`
 		SELECT mp.match_id FROM match_players mp
 		JOIN matches m ON mp.match_id = m.id
@@ -334,22 +349,23 @@ func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	matchIDs := []string{}
+	var matchIDs []string
 	for rows.Next() {
 		var matchID string
-		if err := rows.Scan(&matchID); err != nil {
-			continue
+		if err := rows.Scan(&matchID); err == nil {
+			matchIDs = append(matchIDs, matchID)
 		}
-		matchIDs = append(matchIDs, matchID)
 	}
 
-	// Mark player as inactive in all those matches
+	// Get user name once
+	var userName string
+	database.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
+
 	for _, matchID := range matchIDs {
-		database.DB.Exec("UPDATE match_players SET active = 0 WHERE match_id = ? AND user_id = ?", matchID, userID)
-
-		var userName string
-		database.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
-
+		if _, err := database.DB.Exec("UPDATE match_players SET active = 0 WHERE match_id = ? AND user_id = ?", matchID, userID); err != nil {
+			log.Printf("Error deactivating player %s from match %s: %v", userID, matchID, err)
+			continue
+		}
 		BroadcastToMatch(matchID, models.WSMessage{
 			Type:     "player_left",
 			UserID:   userID,
@@ -357,20 +373,23 @@ func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// For matches where user IS the creator and match is still 'waiting', end them
-	database.DB.Exec(`
-		UPDATE matches SET status = 'finished' 
-		WHERE creator_id = ? AND status = 'waiting'
-	`, userID)
+	// End waiting matches where user is creator
+	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = ? AND status = 'waiting'", userID); err != nil {
+		log.Printf("Error finishing creator matches for user %s: %v", userID, err)
+	}
 
-	// Cancel pending invites for this user
+	// Also end playing matches where user is creator (orphan prevention)
+	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = ? AND status = 'playing'", userID); err != nil {
+		log.Printf("Error finishing playing creator matches for user %s: %v", userID, err)
+	}
+
+	// Cancel pending invites
 	database.DB.Exec("UPDATE invites SET status = 'expired' WHERE target_user_id = ? AND status = 'pending'", userID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Left all matches"})
 }
 
-// GetActiveMatch returns the active match for a user (if any)
 func GetActiveMatch(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	userID := vars["id"]
@@ -384,7 +403,6 @@ func GetActiveMatch(w http.ResponseWriter, r *http.Request) {
 	`, userID).Scan(&matchID)
 
 	if err != nil {
-		// No active match
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"match_id": nil})
 		return

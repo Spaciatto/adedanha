@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
-	"math/rand"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"adedanha-golang/database"
@@ -28,9 +31,6 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	// Seed random number generator
-	rand.Seed(time.Now().UnixNano())
-
 	// Initialize database
 	dbPath := "./data/adedanha.db"
 	database.InitDB(dbPath)
@@ -39,10 +39,18 @@ func main() {
 	handlers.GameHub = handlers.NewHub()
 	go handlers.GameHub.Run()
 
+	// Start periodic cleanup job
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			database.Cleanup()
+			log.Println("Database cleanup completed")
+		}
+	}()
+
 	// Setup router
 	r := mux.NewRouter()
-
-	// Apply CORS middleware
 	r.Use(corsMiddleware)
 
 	// User routes
@@ -78,7 +86,36 @@ func main() {
 	r.HandleFunc("/ws/{matchId}/{userId}", handlers.HandleWebSocket)
 	r.HandleFunc("/ws/presence/{userId}", handlers.HandlePresenceWebSocket)
 
-	// Start server
-	log.Println("Adedanha server starting on :8080")
-	log.Fatal(http.ListenAndServe(":8080", r))
+	// Create server with timeouts
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Println("Adedanha server starting on :8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	database.DB.Close()
+	log.Println("Server stopped")
 }
