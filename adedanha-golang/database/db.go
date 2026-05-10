@@ -104,6 +104,8 @@ func createTables() {
 		object TEXT,
 		movie TEXT,
 		city TEXT,
+		animal TEXT,
+		name TEXT,
 		score INTEGER DEFAULT 0,
 		submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (round_id) REFERENCES rounds(id),

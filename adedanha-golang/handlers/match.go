@@ -435,15 +435,17 @@ func SubmitAnswers(w http.ResponseWriter, r *http.Request) {
 		Object:      strings.ToUpper(req.Object),
 		Movie:       strings.ToUpper(req.Movie),
 		City:        strings.ToUpper(req.City),
+		Animal:      strings.ToUpper(req.Animal),
+		Name:        strings.ToUpper(req.Name),
 		Score:       0,
 		SubmittedAt: time.Now(),
 	}
 
 	if _, err := database.DB.Exec(
-		`INSERT INTO answers (id, round_id, user_id, color, fruit, object, movie, city, score, submitted_at) 
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(round_id, user_id) DO UPDATE SET color=excluded.color, fruit=excluded.fruit, object=excluded.object, movie=excluded.movie, city=excluded.city, submitted_at=excluded.submitted_at`,
-		answer.ID, answer.RoundID, answer.UserID, answer.Color, answer.Fruit, answer.Object, answer.Movie, answer.City, answer.Score, answer.SubmittedAt,
+		`INSERT INTO answers (id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at) 
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(round_id, user_id) DO UPDATE SET color=excluded.color, fruit=excluded.fruit, object=excluded.object, movie=excluded.movie, city=excluded.city, animal=excluded.animal, name=excluded.name, submitted_at=excluded.submitted_at`,
+		answer.ID, answer.RoundID, answer.UserID, answer.Color, answer.Fruit, answer.Object, answer.Movie, answer.City, answer.Animal, answer.Name, answer.Score, answer.SubmittedAt,
 	); err != nil {
 		http.Error(w, `{"error":"Failed to submit answers"}`, http.StatusInternalServerError)
 		return
@@ -622,7 +624,7 @@ func GetMatchState(w http.ResponseWriter, r *http.Request) {
 			} else {
 				state.Phase = "round_ended"
 				answerRows, err := database.DB.Query(
-					"SELECT id, round_id, user_id, color, fruit, object, movie, city, score, submitted_at FROM answers WHERE round_id = ?",
+					"SELECT id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at FROM answers WHERE round_id = ?",
 					round.ID,
 				)
 				if err == nil {
@@ -630,7 +632,7 @@ func GetMatchState(w http.ResponseWriter, r *http.Request) {
 					var answers []models.Answer
 					for answerRows.Next() {
 						var a models.Answer
-						if err := answerRows.Scan(&a.ID, &a.RoundID, &a.UserID, &a.Color, &a.Fruit, &a.Object, &a.Movie, &a.City, &a.Score, &a.SubmittedAt); err == nil {
+						if err := answerRows.Scan(&a.ID, &a.RoundID, &a.UserID, &a.Color, &a.Fruit, &a.Object, &a.Movie, &a.City, &a.Animal, &a.Name, &a.Score, &a.SubmittedAt); err == nil {
 							answers = append(answers, a)
 						}
 					}
@@ -994,7 +996,7 @@ func GetRoundResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := database.DB.Query(
-		"SELECT id, round_id, user_id, color, fruit, object, movie, city, score, submitted_at FROM answers WHERE round_id = ?",
+		"SELECT id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at FROM answers WHERE round_id = ?",
 		roundID,
 	)
 	if err != nil {
@@ -1006,7 +1008,7 @@ func GetRoundResults(w http.ResponseWriter, r *http.Request) {
 	var answers []models.Answer
 	for rows.Next() {
 		var a models.Answer
-		if err := rows.Scan(&a.ID, &a.RoundID, &a.UserID, &a.Color, &a.Fruit, &a.Object, &a.Movie, &a.City, &a.Score, &a.SubmittedAt); err == nil {
+		if err := rows.Scan(&a.ID, &a.RoundID, &a.UserID, &a.Color, &a.Fruit, &a.Object, &a.Movie, &a.City, &a.Animal, &a.Name, &a.Score, &a.SubmittedAt); err == nil {
 			answers = append(answers, a)
 		}
 	}

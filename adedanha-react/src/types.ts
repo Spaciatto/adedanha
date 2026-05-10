@@ -42,6 +42,8 @@ export interface Answer {
   object: string;
   movie: string;
   city: string;
+  animal: string;
+  name: string;
   score: number;
   submitted_at: string;
 }

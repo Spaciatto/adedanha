@@ -65,6 +65,8 @@ type Answer struct {
 	Object      string    `json:"object"`
 	Movie       string    `json:"movie"`
 	City        string    `json:"city"`
+	Animal      string    `json:"animal"`
+	Name        string    `json:"name"`
 	Score       int       `json:"score"`
 	SubmittedAt time.Time `json:"submitted_at"`
 }
@@ -76,6 +78,8 @@ type SubmitAnswersRequest struct {
 	Object string `json:"object"`
 	Movie  string `json:"movie"`
 	City   string `json:"city"`
+	Animal string `json:"animal"`
+	Name   string `json:"name"`
 }
 
 type UpdateScoresRequest struct {

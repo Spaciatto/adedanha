@@ -129,6 +129,8 @@ export const api = {
     object: string;
     movie: string;
     city: string;
+    animal: string;
+    name: string;
   }) =>
     request(`/api/matches/${matchId}/rounds/${roundId}/answers`, {
       method: 'POST',

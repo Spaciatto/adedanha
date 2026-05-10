@@ -31,6 +31,8 @@ function MatchPage({ user }: MatchPageProps) {
   const [object, setObject] = useState('');
   const [movie, setMovie] = useState('');
   const [city, setCity] = useState('');
+  const [animal, setAnimal] = useState('');
+  const [playerName, setPlayerName] = useState('');
   const [answersSubmitted, setAnswersSubmitted] = useState(false);
 
   // Scores
@@ -45,6 +47,8 @@ function MatchPage({ user }: MatchPageProps) {
   const objectRef = useRef('');
   const movieRef = useRef('');
   const cityRef = useRef('');
+  const animalRef = useRef('');
+  const playerNameRef = useRef('');
   const answersSubmittedRef = useRef(false);
   const currentRoundRef = useRef<Round | null>(null);
   const phaseRef = useRef<GamePhase>('lobby');
@@ -56,6 +60,8 @@ function MatchPage({ user }: MatchPageProps) {
   useEffect(() => { objectRef.current = object; }, [object]);
   useEffect(() => { movieRef.current = movie; }, [movie]);
   useEffect(() => { cityRef.current = city; }, [city]);
+  useEffect(() => { animalRef.current = animal; }, [animal]);
+  useEffect(() => { playerNameRef.current = playerName; }, [playerName]);
   useEffect(() => { answersSubmittedRef.current = answersSubmitted; }, [answersSubmitted]);
   useEffect(() => { currentRoundRef.current = currentRound; }, [currentRound]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
@@ -189,6 +195,8 @@ function MatchPage({ user }: MatchPageProps) {
             setObject('');
             setMovie('');
             setCity('');
+            setAnimal('');
+            setPlayerName('');
             setRoundResults(null);
             break;
 
@@ -199,7 +207,7 @@ function MatchPage({ user }: MatchPageProps) {
           case 'round_ended':
             // Auto-submit answers if not already submitted
             if (!answersSubmittedRef.current && currentRoundRef.current && phaseRef.current === 'playing') {
-              const hasAnyAnswer = colorRef.current || fruitRef.current || objectRef.current || movieRef.current || cityRef.current;
+              const hasAnyAnswer = colorRef.current || fruitRef.current || objectRef.current || movieRef.current || cityRef.current || animalRef.current || playerNameRef.current;
               if (hasAnyAnswer) {
                 api.submitAnswers(matchId, currentRoundRef.current.id, user.id, {
                   color: colorRef.current.toUpperCase(),
@@ -207,6 +215,8 @@ function MatchPage({ user }: MatchPageProps) {
                   object: objectRef.current.toUpperCase(),
                   movie: movieRef.current.toUpperCase(),
                   city: cityRef.current.toUpperCase(),
+                  animal: animalRef.current.toUpperCase(),
+                  name: playerNameRef.current.toUpperCase(),
                 }).catch(console.error);
               }
               setAnswersSubmitted(true);
@@ -295,6 +305,8 @@ function MatchPage({ user }: MatchPageProps) {
         object: object.toUpperCase(),
         movie: movie.toUpperCase(),
         city: city.toUpperCase(),
+        animal: animal.toUpperCase(),
+        name: playerName.toUpperCase(),
       });
       setAnswersSubmitted(true);
     } catch (err: any) {
@@ -598,6 +610,26 @@ function MatchPage({ user }: MatchPageProps) {
                   placeholder={`Cidade com a letra ${letter}`}
                 />
               </div>
+              <div className="field-group">
+                <label>🐾 Animal</label>
+                <input
+                  className="uppercase"
+                  type="text"
+                  value={animal}
+                  onChange={(e) => setAnimal(e.target.value.toUpperCase())}
+                  placeholder={`Animal com a letra ${letter}`}
+                />
+              </div>
+              <div className="field-group">
+                <label>👤 Nome</label>
+                <input
+                  className="uppercase"
+                  type="text"
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value.toUpperCase())}
+                  placeholder={`Nome com a letra ${letter}`}
+                />
+              </div>
               <button className="success" onClick={handleSubmitAnswers} disabled={loading}>
                 {loading ? 'Enviando...' : 'Enviar Respostas'}
               </button>
@@ -628,6 +660,8 @@ function MatchPage({ user }: MatchPageProps) {
                   <th>Objeto</th>
                   <th>Filme</th>
                   <th>Cidade</th>
+                  <th>Animal</th>
+                  <th>Nome</th>
                   {isCreator && <th>Score</th>}
                 </tr>
               </thead>
@@ -640,6 +674,8 @@ function MatchPage({ user }: MatchPageProps) {
                     <td>{answer.object || '-'}</td>
                     <td>{answer.movie || '-'}</td>
                     <td>{answer.city || '-'}</td>
+                    <td>{answer.animal || '-'}</td>
+                    <td>{answer.name || '-'}</td>
                     {isCreator && (
                       <td>
                         <input
