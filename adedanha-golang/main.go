@@ -82,6 +82,7 @@ func main() {
 	r.HandleFunc("/api/matches/{id}/rounds/{roundId}/answers", handlers.SubmitAnswers).Methods("POST", "OPTIONS")
 	r.HandleFunc("/api/matches/{id}/rounds/{roundId}/scores", handlers.UpdateScores).Methods("PUT", "OPTIONS")
 	r.HandleFunc("/api/matches/{id}/rounds/{roundId}/results", handlers.GetRoundResults).Methods("GET", "OPTIONS")
+	r.HandleFunc("/api/matches/{id}/rounds/{roundId}/validate", handlers.ValidateRound).Methods("GET", "OPTIONS")
 
 	// WebSocket routes
 	r.HandleFunc("/ws/{matchId}/{userId}", handlers.HandleWebSocket)
@@ -92,7 +93,7 @@ func main() {
 		Addr:         ":8080",
 		Handler:      r,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

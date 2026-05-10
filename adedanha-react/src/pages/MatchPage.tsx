@@ -24,6 +24,8 @@ function MatchPage({ user }: MatchPageProps) {
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [availablePlayers, setAvailablePlayers] = useState<{id: string; name: string}[]>([]);
   const [invitedPlayers, setInvitedPlayers] = useState<Record<string, boolean>>({});
+  const [validations, setValidations] = useState<Record<string, Record<string, string>>>({});
+  const [validating, setValidating] = useState(false);
 
   // Answer fields
   const [color, setColor] = useState('');
@@ -383,9 +385,47 @@ function MatchPage({ user }: MatchPageProps) {
     }
   };
 
+  const handleValidateRound = async () => {
+    if (!matchId || !currentRound) return;
+    setValidating(true);
+    try {
+      const results = await api.validateRound(matchId, currentRound.id) as Array<{
+        user_id: string;
+        validations: Array<{ field: string; value: string; status: string }>;
+        suggested_score: number;
+      }>;
+
+      const validationMap: Record<string, Record<string, string>> = {};
+      const suggestedScores: Record<string, number> = {};
+
+      results.forEach((pv) => {
+        validationMap[pv.user_id] = {};
+        pv.validations.forEach((v) => {
+          validationMap[pv.user_id][v.field] = v.status;
+        });
+        suggestedScores[pv.user_id] = pv.suggested_score;
+      });
+
+      setValidations(validationMap);
+      setScores((prev) => ({ ...prev, ...suggestedScores }));
+    } catch (err: any) {
+      setError(err.message || 'Erro ao validar respostas');
+    } finally {
+      setValidating(false);
+    }
+  };
+
   const getPlayerName = (odUserId: string): string => {
     const player = match?.players?.find((p) => p.user_id === odUserId);
     return player?.user_name || odUserId.slice(0, 8);
+  };
+
+  const getValidationIcon = (userId: string, field: string): string => {
+    const v = validations[userId]?.[field];
+    if (!v) return '';
+    if (v === 'valid') return ' ✅';
+    if (v === 'invalid') return ' ❌';
+    return ' ⚠️';
   };
 
   if (!match) {
@@ -669,13 +709,13 @@ function MatchPage({ user }: MatchPageProps) {
                 {roundResults.answers.map((answer) => (
                   <tr key={answer.user_id}>
                     <td><strong>{getPlayerName(answer.user_id)}</strong></td>
-                    <td>{answer.color || '-'}</td>
-                    <td>{answer.fruit || '-'}</td>
-                    <td>{answer.object || '-'}</td>
-                    <td>{answer.movie || '-'}</td>
-                    <td>{answer.city || '-'}</td>
-                    <td>{answer.animal || '-'}</td>
-                    <td>{answer.name || '-'}</td>
+                    <td>{answer.color || '-'}{getValidationIcon(answer.user_id, 'color')}</td>
+                    <td>{answer.fruit || '-'}{getValidationIcon(answer.user_id, 'fruit')}</td>
+                    <td>{answer.object || '-'}{getValidationIcon(answer.user_id, 'object')}</td>
+                    <td>{answer.movie || '-'}{getValidationIcon(answer.user_id, 'movie')}</td>
+                    <td>{answer.city || '-'}{getValidationIcon(answer.user_id, 'city')}</td>
+                    <td>{answer.animal || '-'}{getValidationIcon(answer.user_id, 'animal')}</td>
+                    <td>{answer.name || '-'}{getValidationIcon(answer.user_id, 'name')}</td>
                     {isCreator && (
                       <td>
                         <input
@@ -700,6 +740,14 @@ function MatchPage({ user }: MatchPageProps) {
 
           {isCreator && phase === 'round_ended' && (
             <div style={{ marginTop: '20px' }}>
+              <button className="secondary" onClick={handleValidateRound} disabled={validating} style={{ marginBottom: '12px', display: 'block' }}>
+                {validating ? '🔍 Validando...' : '🔍 Validar Respostas (Internet)'}
+              </button>
+              {Object.keys(validations).length > 0 && (
+                <p style={{ fontSize: '0.8rem', color: '#718096', marginBottom: '12px' }}>
+                  ✅ Válida (10pts) &nbsp; ⚠️ Incerta (5pts) &nbsp; ❌ Inválida (0pts) — Scores pré-preenchidos como sugestão
+                </p>
+              )}
               <button className="success" onClick={handleUpdateScores} disabled={loading}>
                 {loading ? 'Salvando...' : 'Salvar Scores'}
               </button>

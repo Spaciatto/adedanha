@@ -151,6 +151,9 @@ export const api = {
 
   getRoundResults: (matchId: string, roundId: string) =>
     request(`/api/matches/${matchId}/rounds/${roundId}/results`),
+
+  validateRound: (matchId: string, roundId: string) =>
+    request(`/api/matches/${matchId}/rounds/${roundId}/validate`),
 };
 
 export function connectWebSocket(matchId: string, userId: string): WebSocket {
