@@ -2,6 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { User, Match, Round, Answer, WSMessage, RoundResult, RankingEntry, MatchState, JoinRequest } from '../types';
 import { api, connectWebSocket } from '../api';
+import MatchHeader from '../components/MatchHeader';
+import MatchLobby from '../components/MatchLobby';
+import MatchFinished from '../components/MatchFinished';
+import RoundPlaying from '../components/RoundPlaying';
+import RoundResults from '../components/RoundResults';
 
 interface MatchPageProps {
   user: User;
@@ -446,347 +451,72 @@ function MatchPage({ user }: MatchPageProps) {
 
   return (
     <>
-      {/* Match Info Header */}
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <h2>{match.name || 'Partida'}</h2>
-            <span className={`status-badge ${match.status}`}>{match.status}</span>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <span style={{ fontSize: '0.85rem', color: '#718096', display: 'block' }}>Rodada: {match.current_round}</span>
-            {!isCreator && phase !== 'finished' && (
-              <button className="danger" onClick={handleLeaveMatch} disabled={loading} style={{ marginTop: '8px', fontSize: '0.8rem', padding: '6px 12px' }}>
-                Abandonar
-              </button>
-            )}
-          </div>
-        </div>
+      <MatchHeader
+        match={match}
+        isCreator={isCreator}
+        phase={phase}
+        loading={loading}
+        error={error}
+        onLeave={handleLeaveMatch}
+      />
 
-        <div className="match-id-display">
-          <strong>ID para convidar:</strong> {match.id}
-        </div>
-
-        <div>
-          <strong style={{ fontSize: '0.9rem', color: '#718096' }}>Jogadores:</strong>
-          <div className="players-list">
-            {match.players?.map((p) => (
-              <span
-                key={p.user_id}
-                className={`player-badge ${p.user_id === match.creator_id ? 'creator' : ''} ${!p.active ? 'inactive' : ''}`}
-              >
-                {p.user_name || p.user_id.slice(0, 8)}
-                {p.user_id === match.creator_id && ' 👑'}
-                {!p.active && ' (saiu)'}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {error && <div className="error-message">{error}</div>}
-      </div>
-
-      {/* Join Requests for Creator */}
-      {isCreator && joinRequests.length > 0 && phase === 'lobby' && (
-        <div className="card">
-          <h3>Solicitações de Entrada</h3>
-          <div className="join-requests-list">
-            {joinRequests.map((req) => (
-              <div key={req.id} className="join-request-item">
-                <span className="join-request-name">{req.user_name}</span>
-                <div>
-                  <button className="success" onClick={() => handleRespondJoinRequest(req.id, true)} style={{ fontSize: '0.85rem', padding: '6px 12px' }}>
-                    Aceitar
-                  </button>
-                  <button className="danger" onClick={() => handleRespondJoinRequest(req.id, false)} style={{ fontSize: '0.85rem', padding: '6px 12px' }}>
-                    Recusar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Invite Players for Creator */}
-      {isCreator && phase === 'lobby' && (
-        <div className="card">
-          <h3>Convidar Jogadores</h3>
-          <p style={{ marginBottom: '12px', color: '#718096', fontSize: '0.9rem' }}>
-            Jogadores online disponíveis (sem partida ativa):
-          </p>
-          {availablePlayers.length === 0 ? (
-            <p style={{ color: '#a0aec0' }}>Nenhum jogador disponível no momento.</p>
-          ) : (
-            <div className="online-users-list">
-              {availablePlayers.map((p) => (
-                <div key={p.id} className="online-user-item">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span className="online-dot"></span>
-                    <span className="online-user-name">{p.name}</span>
-                  </div>
-                  <button
-                    className={invitedPlayers[p.id] ? 'secondary' : 'primary'}
-                    onClick={() => handleInvitePlayer(p.id)}
-                    disabled={invitedPlayers[p.id]}
-                    style={{ fontSize: '0.8rem', padding: '6px 12px', marginBottom: 0 }}
-                  >
-                    {invitedPlayers[p.id] ? '✓ Convidado' : 'Convidar'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Finished Phase - Ranking */}
       {phase === 'finished' && (
-        <div className="card">
-          <div className="round-ended-banner" style={{ background: 'linear-gradient(135deg, #667eea, #764ba2)' }}>
-            🏆 Partida Encerrada!
-          </div>
-
-          <h3>Ranking Final</h3>
-          <table className="results-table">
-            <thead>
-              <tr>
-                <th>Posição</th>
-                <th>Jogador</th>
-                <th>Pontuação Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ranking.map((entry) => (
-                <tr key={entry.user_id}>
-                  <td>
-                    <strong>
-                      {entry.position === 1 && '🥇 '}
-                      {entry.position === 2 && '🥈 '}
-                      {entry.position === 3 && '🥉 '}
-                      {entry.position}º
-                    </strong>
-                  </td>
-                  <td><strong>{entry.user_name}</strong></td>
-                  <td><strong>{entry.total_score} pts</strong></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button className="primary" onClick={() => navigate('/')} style={{ marginTop: '20px' }}>
-            Voltar ao Início
-          </button>
-        </div>
+        <MatchFinished ranking={ranking} onGoHome={() => navigate('/')} />
       )}
 
-      {/* Lobby Phase */}
       {phase === 'lobby' && (
-        <div className="card">
-          <h3>Aguardando início da rodada...</h3>
-          <p style={{ color: '#718096', marginBottom: '15px' }}>
-            {isCreator
-              ? 'Você é o criador da partida. Inicie a rodada quando todos estiverem prontos.'
-              : 'Aguarde o criador da partida iniciar a rodada.'}
-          </p>
-          {isCreator && (
-            <button className="primary" onClick={handleStartRound} disabled={loading}>
-              {loading ? 'Iniciando...' : 'Iniciar Rodada'}
-            </button>
-          )}
-        </div>
+        <MatchLobby
+          isCreator={isCreator}
+          loading={loading}
+          joinRequests={joinRequests}
+          availablePlayers={availablePlayers}
+          invitedPlayers={invitedPlayers}
+          onStartRound={handleStartRound}
+          onRespondRequest={handleRespondJoinRequest}
+          onInvitePlayer={handleInvitePlayer}
+        />
       )}
 
-      {/* Playing Phase */}
       {phase === 'playing' && (
-        <div className="card">
-          <div className="letter-display">{letter}</div>
-
-          <div className={`timer ${secondsRemaining <= 10 ? 'warning' : 'normal'}`}>
-            ⏱️ {secondsRemaining}s
-          </div>
-
-          {!answersSubmitted ? (
-            <>
-              <div className="field-group">
-                <label>🎨 Cor</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={color}
-                  onChange={(e) => setColor(e.target.value.toUpperCase())}
-                  placeholder={`Cor com a letra ${letter}`}
-                />
-              </div>
-              <div className="field-group">
-                <label>🍎 Fruta</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={fruit}
-                  onChange={(e) => setFruit(e.target.value.toUpperCase())}
-                  placeholder={`Fruta com a letra ${letter}`}
-                />
-              </div>
-              <div className="field-group">
-                <label>📦 Objeto</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={object}
-                  onChange={(e) => setObject(e.target.value.toUpperCase())}
-                  placeholder={`Objeto com a letra ${letter}`}
-                />
-              </div>
-              <div className="field-group">
-                <label>🎬 Filme</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={movie}
-                  onChange={(e) => setMovie(e.target.value.toUpperCase())}
-                  placeholder={`Filme com a letra ${letter}`}
-                />
-              </div>
-              <div className="field-group">
-                <label>🏙️ Cidade</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value.toUpperCase())}
-                  placeholder={`Cidade com a letra ${letter}`}
-                />
-              </div>
-              <div className="field-group">
-                <label>🐾 Animal</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={animal}
-                  onChange={(e) => setAnimal(e.target.value.toUpperCase())}
-                  placeholder={`Animal com a letra ${letter}`}
-                />
-              </div>
-              <div className="field-group">
-                <label>👤 Nome</label>
-                <input
-                  className="uppercase"
-                  type="text"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value.toUpperCase())}
-                  placeholder={`Nome com a letra ${letter}`}
-                />
-              </div>
-              <button className="success" onClick={handleSubmitAnswers} disabled={loading}>
-                {loading ? 'Enviando...' : 'Enviar Respostas'}
-              </button>
-            </>
-          ) : (
-            <div className="success-message">
-              ✅ Respostas enviadas! Aguardando fim da rodada...
-            </div>
-          )}
-        </div>
+        <RoundPlaying
+          letter={letter}
+          secondsRemaining={secondsRemaining}
+          answersSubmitted={answersSubmitted}
+          color={color}
+          fruit={fruit}
+          object={object}
+          movie={movie}
+          city={city}
+          animal={animal}
+          playerName={playerName}
+          loading={loading}
+          onColorChange={setColor}
+          onFruitChange={setFruit}
+          onObjectChange={setObject}
+          onMovieChange={setMovie}
+          onCityChange={setCity}
+          onAnimalChange={setAnimal}
+          onPlayerNameChange={setPlayerName}
+          onSubmit={handleSubmitAnswers}
+        />
       )}
 
-      {/* Round Ended Phase */}
       {(phase === 'round_ended' || phase === 'scores') && roundResults && (
-        <div className="card">
-          <div className="round-ended-banner">
-            ⏰ Rodada Encerrada! Letra: {roundResults.letter}
-          </div>
-
-          <h3>Respostas dos Jogadores</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="results-table">
-              <thead>
-                <tr>
-                  <th>Jogador</th>
-                  <th>Cor</th>
-                  <th>Fruta</th>
-                  <th>Objeto</th>
-                  <th>Filme</th>
-                  <th>Cidade</th>
-                  <th>Animal</th>
-                  <th>Nome</th>
-                  {isCreator && <th>Score</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {roundResults.answers.map((answer) => (
-                  <tr key={answer.user_id}>
-                    <td><strong>{getPlayerName(answer.user_id)}</strong></td>
-                    <td>{answer.color || '-'}{getValidationIcon(answer.user_id, 'color')}</td>
-                    <td>{answer.fruit || '-'}{getValidationIcon(answer.user_id, 'fruit')}</td>
-                    <td>{answer.object || '-'}{getValidationIcon(answer.user_id, 'object')}</td>
-                    <td>{answer.movie || '-'}{getValidationIcon(answer.user_id, 'movie')}</td>
-                    <td>{answer.city || '-'}{getValidationIcon(answer.user_id, 'city')}</td>
-                    <td>{answer.animal || '-'}{getValidationIcon(answer.user_id, 'animal')}</td>
-                    <td>{answer.name || '-'}{getValidationIcon(answer.user_id, 'name')}</td>
-                    {isCreator && (
-                      <td>
-                        <input
-                          className="score-input"
-                          type="number"
-                          min="0"
-                          value={scores[answer.user_id] || 0}
-                          onChange={(e) =>
-                            setScores((prev) => ({
-                              ...prev,
-                              [answer.user_id]: parseInt(e.target.value) || 0,
-                            }))
-                          }
-                        />
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {isCreator && phase === 'round_ended' && (
-            <div style={{ marginTop: '20px' }}>
-              <button className="secondary" onClick={handleValidateRound} disabled={validating} style={{ marginBottom: '12px', display: 'block' }}>
-                {validating ? '🔍 Validando...' : '🔍 Validar Respostas (Internet)'}
-              </button>
-              {Object.keys(validations).length > 0 && (
-                <p style={{ fontSize: '0.8rem', color: '#718096', marginBottom: '12px' }}>
-                  ✅ Válida (10pts) &nbsp; ⚠️ Incerta (5pts) &nbsp; ❌ Inválida (0pts) — Scores pré-preenchidos como sugestão
-                </p>
-              )}
-              <button className="success" onClick={handleUpdateScores} disabled={loading}>
-                {loading ? 'Salvando...' : 'Salvar Scores'}
-              </button>
-              <button className="primary" onClick={handleStartRound} disabled={loading} style={{ marginLeft: '10px' }}>
-                {loading ? 'Iniciando...' : 'Iniciar Nova Rodada'}
-              </button>
-              <button className="danger" onClick={handleEndMatch} disabled={loading} style={{ marginLeft: '10px' }}>
-                {loading ? 'Encerrando...' : 'Encerrar Partida'}
-              </button>
-            </div>
-          )}
-
-          {isCreator && phase === 'scores' && (
-            <div style={{ marginTop: '20px' }}>
-              <div className="success-message">✅ Scores salvos!</div>
-              <button className="primary" onClick={handleStartRound} disabled={loading}>
-                {loading ? 'Iniciando...' : 'Iniciar Nova Rodada'}
-              </button>
-              <button className="danger" onClick={handleEndMatch} disabled={loading} style={{ marginLeft: '10px' }}>
-                {loading ? 'Encerrando...' : 'Encerrar Partida'}
-              </button>
-            </div>
-          )}
-
-          {!isCreator && (
-            <div style={{ marginTop: '15px' }}>
-              <p style={{ color: '#718096' }}>
-                Aguardando o criador da partida avaliar as respostas e iniciar a próxima rodada...
-              </p>
-            </div>
-          )}
-        </div>
+        <RoundResults
+          roundResults={roundResults}
+          match={match}
+          isCreator={isCreator}
+          phase={phase}
+          scores={scores}
+          validations={validations}
+          validating={validating}
+          loading={loading}
+          onScoreChange={(userId, score) => setScores((prev) => ({ ...prev, [userId]: score }))}
+          onValidate={handleValidateRound}
+          onSaveScores={handleUpdateScores}
+          onStartRound={handleStartRound}
+          onEndMatch={handleEndMatch}
+        />
       )}
     </>
   );
