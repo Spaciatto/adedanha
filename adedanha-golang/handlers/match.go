@@ -11,6 +11,7 @@ import (
 
 	"adedanha-golang/database"
 	"adedanha-golang/internal/domain"
+	"adedanha-golang/internal/httputil"
 	"adedanha-golang/models"
 
 	"github.com/google/uuid"
@@ -18,6 +19,33 @@ import (
 )
 
 var validLetters = domain.ValidLetters
+
+// --- Helpers ---
+
+// verifyMatchCreator checks if the user is the creator of the match.
+// Returns creatorID on success, or writes error response and returns empty string.
+func verifyMatchCreator(w http.ResponseWriter, matchID, userID string) (string, bool) {
+	var creatorID string
+	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = $1", matchID).Scan(&creatorID); err != nil {
+		httputil.RespondError(w, domain.ErrMatchNotFound)
+		return "", false
+	}
+	if userID != creatorID {
+		httputil.RespondError(w, domain.ErrNotCreator)
+		return "", false
+	}
+	return creatorID, true
+}
+
+// getMatchCreatorID returns the creator ID of a match or writes error.
+func getMatchCreatorID(w http.ResponseWriter, matchID string) (string, bool) {
+	var creatorID string
+	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = $1", matchID).Scan(&creatorID); err != nil {
+		httputil.RespondError(w, domain.ErrMatchNotFound)
+		return "", false
+	}
+	return creatorID, true
+}
 
 // roundStopChannels stores cancel channels for active round timers
 var roundStopChannels = make(map[string]chan struct{})

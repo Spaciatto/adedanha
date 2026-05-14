@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"time"
@@ -15,12 +14,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-var emailRegex = domain.ValidateEmail
-
-func isValidEmail(email string) bool {
-	return domain.ValidateEmail(email)
-}
-
 func CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateUserRequest
 	if err := httputil.DecodeJSON(r, &req); err != nil {
@@ -33,7 +26,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := models.User{
+	user := domain.User{
 		ID:        uuid.New().String(),
 		Name:      req.Name,
 		Email:     req.Email,
@@ -53,107 +46,50 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func UpdateUser(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
+	userID := mux.Vars(r)["id"]
 
 	var req models.UpdateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
-	if req.Name == "" || req.Email == "" {
-		http.Error(w, `{"error":"Name and email are required"}`, http.StatusBadRequest)
+	if err := domain.ValidateCreateUser(req.Name, req.Email); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
-	if !isValidEmail(req.Email) {
-		http.Error(w, `{"error":"Invalid email format"}`, http.StatusBadRequest)
-		return
-	}
-
-	result, err := database.DB.Exec(
-		"UPDATE users SET name = $1, email = $2 WHERE id = $3",
-		req.Name, req.Email, userID,
-	)
+	result, err := database.DB.Exec("UPDATE users SET name = $1, email = $2 WHERE id = $3", req.Name, req.Email, userID)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to update user. Email may already be in use."}`, http.StatusConflict)
+		httputil.RespondError(w, domain.ErrEmailExists)
+		return
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		httputil.RespondError(w, domain.ErrUserNotFound)
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+	var user domain.User
+	if err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = $1", userID).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt); err != nil {
+		httputil.RespondError(w, domain.ErrUserNotFound)
 		return
 	}
 
-	var user models.User
-	err = database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = $1", userID).
-		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
-	if err != nil {
-		http.Error(w, `{"error":"Failed to retrieve updated user"}`, http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	httputil.RespondJSON(w, http.StatusOK, user)
 }
 
 func GetUser(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
+	userID := mux.Vars(r)["id"]
 
-	var user models.User
-	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = $1", userID).
-		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
-	if err != nil {
-		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+	var user domain.User
+	if err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = $1", userID).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt); err != nil {
+		httputil.RespondError(w, domain.ErrUserNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
-}
-
-func GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
-	onlineUserIDs := GameHub.GetOnlineUserIDs()
-
-	if len(onlineUserIDs) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]models.OnlineUser{})
-		return
-	}
-
-	placeholders := ""
-	args := make([]interface{}, len(onlineUserIDs))
-	for i, id := range onlineUserIDs {
-		if i > 0 {
-			placeholders += ","
-		}
-		placeholders += "$1"
-		args[i] = id
-	}
-
-	rows, err := database.DB.Query(
-		"SELECT id, name FROM users WHERE id IN ("+placeholders+")", args...,
-	)
-	if err != nil {
-		http.Error(w, `{"error":"Failed to get online users"}`, http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	users := []models.OnlineUser{}
-	for rows.Next() {
-		var u models.OnlineUser
-		if err := rows.Scan(&u.ID, &u.Name); err != nil {
-			continue
-		}
-		users = append(users, u)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	httputil.RespondJSON(w, http.StatusOK, user)
 }
 
 func LoginUser(w http.ResponseWriter, r *http.Request) {
@@ -164,16 +100,14 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, err)
 		return
 	}
-
 	if req.Email == "" {
 		httputil.RespondError(w, domain.ErrEmailRequired)
 		return
 	}
 
-	var user models.User
-	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE email = $1", req.Email).
-		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
-	if err != nil {
+	var user domain.User
+	if err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE email = $1", req.Email).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt); err != nil {
 		httputil.RespondError(w, domain.ErrUserNotFound)
 		return
 	}
@@ -181,266 +115,267 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	httputil.RespondJSON(w, http.StatusOK, user)
 }
 
-func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
-	onlineUserIDs := GameHub.GetOnlineUserIDs()
-
-	if len(onlineUserIDs) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]models.OnlineUser{})
+func GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
+	onlineIDs := GameHub.GetOnlineUserIDs()
+	if len(onlineIDs) == 0 {
+		httputil.RespondJSON(w, http.StatusOK, []domain.OnlineUser{})
 		return
 	}
 
-	placeholders := ""
-	args := make([]interface{}, len(onlineUserIDs))
-	for i, id := range onlineUserIDs {
-		if i > 0 {
-			placeholders += ","
-		}
-		placeholders += "$1"
-		args[i] = id
+	users, err := queryUsersByIDs(onlineIDs)
+	if err != nil {
+		httputil.RespondJSON(w, http.StatusOK, []domain.OnlineUser{})
+		return
+	}
+	httputil.RespondJSON(w, http.StatusOK, users)
+}
+
+func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
+	onlineIDs := GameHub.GetOnlineUserIDs()
+	if len(onlineIDs) == 0 {
+		httputil.RespondJSON(w, http.StatusOK, []domain.OnlineUser{})
+		return
 	}
 
+	placeholders, args := buildPlaceholders(onlineIDs)
 	rows, err := database.DB.Query(`
 		SELECT id, name FROM users 
 		WHERE id IN (`+placeholders+`)
 		AND id NOT IN (
 			SELECT mp.user_id FROM match_players mp
 			JOIN matches m ON mp.match_id = m.id
-			WHERE mp.active = TRUE AND m.status != 'finished'
-		)`, args...,
-	)
+			WHERE mp.active = TRUE AND m.status != '`+domain.MatchStatusFinished+`'
+		)`, args...)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to get available players"}`, http.StatusInternalServerError)
+		httputil.RespondJSON(w, http.StatusOK, []domain.OnlineUser{})
 		return
 	}
 	defer rows.Close()
 
-	users := []models.OnlineUser{}
+	users := []domain.OnlineUser{}
 	for rows.Next() {
-		var u models.OnlineUser
-		if err := rows.Scan(&u.ID, &u.Name); err != nil {
-			continue
+		var u domain.OnlineUser
+		if rows.Scan(&u.ID, &u.Name) == nil {
+			users = append(users, u)
 		}
-		users = append(users, u)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	httputil.RespondJSON(w, http.StatusOK, users)
 }
 
 func GetPendingInvites(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["userId"]
+	userID := mux.Vars(r)["userId"]
 
 	rows, err := database.DB.Query(
-		"SELECT id, match_id, match_name, inviter_name, status FROM invites WHERE target_user_id = $1 AND status = 'pending' ORDER BY created_at DESC",
-		userID,
+		"SELECT id, match_id, match_name, inviter_name, status FROM invites WHERE target_user_id = $1 AND status = $2 ORDER BY created_at DESC",
+		userID, domain.StatusPending,
 	)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to get invites"}`, http.StatusInternalServerError)
+		httputil.RespondJSON(w, http.StatusOK, []domain.Invite{})
 		return
 	}
 	defer rows.Close()
 
-	type Invite struct {
-		ID          string `json:"id"`
-		MatchID     string `json:"match_id"`
-		MatchName   string `json:"match_name"`
-		InviterName string `json:"inviter_name"`
-		Status      string `json:"status"`
-	}
-
-	invites := []Invite{}
+	invites := []domain.Invite{}
 	for rows.Next() {
-		var inv Invite
-		if err := rows.Scan(&inv.ID, &inv.MatchID, &inv.MatchName, &inv.InviterName, &inv.Status); err != nil {
-			continue
+		var inv domain.Invite
+		if rows.Scan(&inv.ID, &inv.MatchID, &inv.MatchName, &inv.InviterName, &inv.Status) == nil {
+			invites = append(invites, inv)
 		}
-		invites = append(invites, inv)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(invites)
+	httputil.RespondJSON(w, http.StatusOK, invites)
 }
 
 func RespondInvite(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	inviteID := vars["inviteId"]
+	inviteID := mux.Vars(r)["inviteId"]
 
 	var reqBody struct {
 		UserID   string `json:"user_id"`
 		Accepted bool   `json:"accepted"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+	if err := httputil.DecodeJSON(r, &reqBody); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
 	var matchID, targetUserID string
-	err := database.DB.QueryRow(
-		"SELECT match_id, target_user_id FROM invites WHERE id = $1 AND status = 'pending'",
-		inviteID,
-	).Scan(&matchID, &targetUserID)
-	if err != nil {
-		http.Error(w, `{"error":"Invite not found or already processed"}`, http.StatusNotFound)
+	if err := database.DB.QueryRow(
+		"SELECT match_id, target_user_id FROM invites WHERE id = $1 AND status = $2", inviteID, domain.StatusPending,
+	).Scan(&matchID, &targetUserID); err != nil {
+		httputil.RespondError(w, domain.ErrInviteNotFound)
 		return
 	}
 
 	if reqBody.UserID != targetUserID {
-		http.Error(w, `{"error":"This invite is not for you"}`, http.StatusForbidden)
+		httputil.RespondError(w, domain.ErrNotTargetUser)
 		return
 	}
 
 	if reqBody.Accepted {
-		if _, err := database.DB.Exec("UPDATE invites SET status = 'accepted' WHERE id = $1", inviteID); err != nil {
-			log.Printf("Error updating invite status: %v", err)
-		}
+		database.DB.Exec("UPDATE invites SET status = $1 WHERE id = $2", domain.StatusAccepted, inviteID)
 
 		var userName string
 		if err := database.DB.QueryRow("SELECT name FROM users WHERE id = $1", reqBody.UserID).Scan(&userName); err != nil {
-			http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+			httputil.RespondError(w, domain.ErrUserNotFound)
 			return
 		}
 
-		_, err := database.DB.Exec(
+		if _, err := database.DB.Exec(
 			"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES ($1, $2, TRUE, $3) ON CONFLICT (match_id, user_id) DO NOTHING",
 			matchID, reqBody.UserID, time.Now(),
-		)
-		if err != nil {
-			http.Error(w, `{"error":"Failed to join match"}`, http.StatusInternalServerError)
-			return
+		); err != nil {
+			log.Printf("Error adding player to match: %v", err)
 		}
 
-		BroadcastToMatch(matchID, models.WSMessage{
+		BroadcastToMatch(matchID, domain.WSMessage{
 			Type:     "player_joined",
 			UserID:   reqBody.UserID,
 			UserName: userName,
 		})
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Invite accepted", "match_id": matchID})
+		httputil.RespondJSON(w, http.StatusOK, map[string]string{"message": "Invite accepted", "match_id": matchID})
 	} else {
-		database.DB.Exec("UPDATE invites SET status = 'rejected' WHERE id = $1", inviteID)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"message": "Invite rejected"})
+		database.DB.Exec("UPDATE invites SET status = $1 WHERE id = $2", domain.StatusRejected, inviteID)
+		httputil.RespondJSON(w, http.StatusOK, map[string]string{"message": "Invite rejected"})
 	}
 }
 
 func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
+	userID := mux.Vars(r)["id"]
 
-	// Get matches where user is active non-creator player
 	rows, err := database.DB.Query(`
 		SELECT mp.match_id FROM match_players mp
 		JOIN matches m ON mp.match_id = m.id
-		WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished' AND m.creator_id != $2
-	`, userID, userID)
+		WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != $2 AND m.creator_id != $1
+	`, userID, domain.MatchStatusFinished)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to leave matches"}`, http.StatusInternalServerError)
+		httputil.RespondError(w, domain.ErrNotFound)
 		return
 	}
 	defer rows.Close()
 
 	var matchIDs []string
 	for rows.Next() {
-		var matchID string
-		if err := rows.Scan(&matchID); err == nil {
-			matchIDs = append(matchIDs, matchID)
+		var id string
+		if rows.Scan(&id) == nil {
+			matchIDs = append(matchIDs, id)
 		}
 	}
 
-	// Get user name once
 	var userName string
 	database.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&userName)
 
 	for _, matchID := range matchIDs {
-		if _, err := database.DB.Exec("UPDATE match_players SET active = FALSE WHERE match_id = $1 AND user_id = $2", matchID, userID); err != nil {
-			log.Printf("Error deactivating player %s from match %s: %v", userID, matchID, err)
-			continue
-		}
-		BroadcastToMatch(matchID, models.WSMessage{
+		database.DB.Exec("UPDATE match_players SET active = FALSE WHERE match_id = $1 AND user_id = $2", matchID, userID)
+		BroadcastToMatch(matchID, domain.WSMessage{
 			Type:     "player_left",
 			UserID:   userID,
 			UserName: userName,
 		})
 	}
 
-	// End waiting matches where user is creator
-	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = $1 AND status = 'waiting'", userID); err != nil {
-		log.Printf("Error finishing creator matches for user %s: %v", userID, err)
-	}
+	database.DB.Exec("UPDATE matches SET status = $1 WHERE creator_id = $2 AND status = $3", domain.MatchStatusFinished, userID, domain.MatchStatusWaiting)
+	database.DB.Exec("UPDATE matches SET status = $1 WHERE creator_id = $2 AND status = $3", domain.MatchStatusFinished, userID, domain.MatchStatusPlaying)
+	database.DB.Exec("UPDATE invites SET status = $1 WHERE target_user_id = $2 AND status = $3", domain.StatusExpired, userID, domain.StatusPending)
 
-	// Also end playing matches where user is creator (orphan prevention)
-	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = $1 AND status = 'playing'", userID); err != nil {
-		log.Printf("Error finishing playing creator matches for user %s: %v", userID, err)
-	}
-
-	// Cancel pending invites
-	database.DB.Exec("UPDATE invites SET status = 'expired' WHERE target_user_id = $1 AND status = 'pending'", userID)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Left all matches"})
+	httputil.RespondJSON(w, http.StatusOK, map[string]string{"message": "Left all matches"})
 }
 
 func GetActiveMatch(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
+	userID := mux.Vars(r)["id"]
 
 	var matchID string
 	err := database.DB.QueryRow(`
 		SELECT mp.match_id FROM match_players mp
 		JOIN matches m ON mp.match_id = m.id
-		WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished'
+		WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != $2
 		LIMIT 1
-	`, userID).Scan(&matchID)
+	`, userID, domain.MatchStatusFinished).Scan(&matchID)
 
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"match_id": nil})
+		httputil.RespondJSON(w, http.StatusOK, map[string]interface{}{"match_id": nil})
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"match_id": matchID})
+	httputil.RespondJSON(w, http.StatusOK, map[string]string{"match_id": matchID})
 }
 
-// UploadAvatar handles avatar image upload (base64 encoded)
 func UploadAvatar(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["id"]
+	userID := mux.Vars(r)["id"]
 
 	var reqBody struct {
 		Avatar string `json:"avatar"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+	if err := httputil.DecodeJSON(r, &reqBody); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
-	if reqBody.Avatar == "" {
-		http.Error(w, `{"error":"Avatar data is required"}`, http.StatusBadRequest)
-		return
-	}
-
-	// Limit avatar size to ~500KB base64 (roughly 375KB image)
-	if len(reqBody.Avatar) > 500000 {
-		http.Error(w, `{"error":"Imagem muito grande. Máximo 500KB."}`, http.StatusBadRequest)
+	if reqBody.Avatar != "" && len(reqBody.Avatar) > 500000 {
+		httputil.RespondError(w, domain.ErrAvatarTooLarge)
 		return
 	}
 
 	result, err := database.DB.Exec("UPDATE users SET avatar = $1 WHERE id = $2", reqBody.Avatar, userID)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to update avatar"}`, http.StatusInternalServerError)
+		httputil.RespondError(w, domain.ErrUserNotFound)
+		return
+	}
+	if rows, _ := result.RowsAffected(); rows == 0 {
+		httputil.RespondError(w, domain.ErrUserNotFound)
 		return
 	}
 
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
-		return
-	}
+	httputil.RespondJSON(w, http.StatusOK, map[string]string{"message": "Avatar updated successfully"})
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"message": "Avatar updated successfully"})
+// --- Helpers ---
+
+func queryUsersByIDs(ids []string) ([]domain.OnlineUser, error) {
+	placeholders, args := buildPlaceholders(ids)
+	rows, err := database.DB.Query("SELECT id, name FROM users WHERE id IN ("+placeholders+")", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []domain.OnlineUser
+	for rows.Next() {
+		var u domain.OnlineUser
+		if rows.Scan(&u.ID, &u.Name) == nil {
+			users = append(users, u)
+		}
+	}
+	return users, nil
+}
+
+func buildPlaceholders(ids []string) (string, []interface{}) {
+	parts := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		parts[i] = "$" + itoa(i+1)
+		args[i] = id
+	}
+	return joinStrings(parts, ","), args
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	s := ""
+	for n > 0 {
+		s = string(rune('0'+n%10)) + s
+		n /= 10
+	}
+	return s
+}
+
+func joinStrings(parts []string, sep string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
+	}
+	return result
 }
