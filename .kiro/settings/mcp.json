@@ -4,7 +4,11 @@
       "url": "https://mcp.render.com/mcp",
       "headers": {
         "Authorization": "Bearer rnd_Go3a4eAH2F14PyaVGxMBt3IE6mGH"
-      }
+      },
+      "autoApprove": [
+        "list_deploys",
+        "list_logs"
+      ]
     }
   }
 }
