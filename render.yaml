@@ -1,0 +1,37 @@
+databases:
+  - name: adedanha-db
+    plan: free
+    databaseName: adedanha
+    user: adedanha
+
+services:
+  - type: web
+    name: adedanha-backend
+    runtime: docker
+    dockerfilePath: ./adedanha-golang/Dockerfile
+    dockerContext: ./adedanha-golang
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: adedanha-db
+          property: connectionString
+
+  - type: web
+    name: adedanha-frontend
+    runtime: static
+    buildCommand: cd adedanha-react && npm install && npm run build
+    staticPublishPath: adedanha-react/dist
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://adedanha-backend.onrender.com/api/*
+      - type: rewrite
+        source: /ws/*
+        destination: https://adedanha-backend.onrender.com/ws/*
+      - type: rewrite
+        source: /adedanha/*
+        destination: /adedanha/*
+      - type: rewrite
+        source: /*
+        destination: /adedanha/index.html

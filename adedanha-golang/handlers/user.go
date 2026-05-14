@@ -45,7 +45,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := database.DB.Exec(
-		"INSERT INTO users (id, name, email, avatar, created_at) VALUES (?, ?, ?, '', ?)",
+		"INSERT INTO users (id, name, email, avatar, created_at) VALUES ($1, $2, $3, '', $4)",
 		user.ID, user.Name, user.Email, user.CreatedAt,
 	)
 	if err != nil {
@@ -79,7 +79,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := database.DB.Exec(
-		"UPDATE users SET name = ?, email = ? WHERE id = ?",
+		"UPDATE users SET name = $1, email = $2 WHERE id = $3",
 		req.Name, req.Email, userID,
 	)
 	if err != nil {
@@ -94,7 +94,7 @@ func UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user models.User
-	err = database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = ?", userID).
+	err = database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = $1", userID).
 		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to retrieve updated user"}`, http.StatusInternalServerError)
@@ -110,7 +110,7 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 	userID := vars["id"]
 
 	var user models.User
-	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = ?", userID).
+	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE id = $1", userID).
 		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
 		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
@@ -136,7 +136,7 @@ func GetOnlineUsers(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			placeholders += ","
 		}
-		placeholders += "?"
+		placeholders += "$1"
 		args[i] = id
 	}
 
@@ -177,7 +177,7 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user models.User
-	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE email = ?", req.Email).
+	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE email = $1", req.Email).
 		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
 		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
@@ -203,7 +203,7 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 		if i > 0 {
 			placeholders += ","
 		}
-		placeholders += "?"
+		placeholders += "$1"
 		args[i] = id
 	}
 
@@ -213,7 +213,7 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 		AND id NOT IN (
 			SELECT mp.user_id FROM match_players mp
 			JOIN matches m ON mp.match_id = m.id
-			WHERE mp.active = 1 AND m.status != 'finished'
+			WHERE mp.active = TRUE AND m.status != 'finished'
 		)`, args...,
 	)
 	if err != nil {
@@ -240,7 +240,7 @@ func GetPendingInvites(w http.ResponseWriter, r *http.Request) {
 	userID := vars["userId"]
 
 	rows, err := database.DB.Query(
-		"SELECT id, match_id, match_name, inviter_name, status FROM invites WHERE target_user_id = ? AND status = 'pending' ORDER BY created_at DESC",
+		"SELECT id, match_id, match_name, inviter_name, status FROM invites WHERE target_user_id = $1 AND status = 'pending' ORDER BY created_at DESC",
 		userID,
 	)
 	if err != nil {
@@ -285,7 +285,7 @@ func RespondInvite(w http.ResponseWriter, r *http.Request) {
 
 	var matchID, targetUserID string
 	err := database.DB.QueryRow(
-		"SELECT match_id, target_user_id FROM invites WHERE id = ? AND status = 'pending'",
+		"SELECT match_id, target_user_id FROM invites WHERE id = $1 AND status = 'pending'",
 		inviteID,
 	).Scan(&matchID, &targetUserID)
 	if err != nil {
@@ -299,18 +299,18 @@ func RespondInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if reqBody.Accepted {
-		if _, err := database.DB.Exec("UPDATE invites SET status = 'accepted' WHERE id = ?", inviteID); err != nil {
+		if _, err := database.DB.Exec("UPDATE invites SET status = 'accepted' WHERE id = $1", inviteID); err != nil {
 			log.Printf("Error updating invite status: %v", err)
 		}
 
 		var userName string
-		if err := database.DB.QueryRow("SELECT name FROM users WHERE id = ?", reqBody.UserID).Scan(&userName); err != nil {
+		if err := database.DB.QueryRow("SELECT name FROM users WHERE id = $1", reqBody.UserID).Scan(&userName); err != nil {
 			http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
 			return
 		}
 
 		_, err := database.DB.Exec(
-			"INSERT OR IGNORE INTO match_players (match_id, user_id, active, joined_at) VALUES (?, ?, 1, ?)",
+			"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES ($1, $2, TRUE, $3) ON CONFLICT (match_id, user_id) DO NOTHING",
 			matchID, reqBody.UserID, time.Now(),
 		)
 		if err != nil {
@@ -327,7 +327,7 @@ func RespondInvite(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "Invite accepted", "match_id": matchID})
 	} else {
-		database.DB.Exec("UPDATE invites SET status = 'rejected' WHERE id = ?", inviteID)
+		database.DB.Exec("UPDATE invites SET status = 'rejected' WHERE id = $1", inviteID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"message": "Invite rejected"})
 	}
@@ -341,7 +341,7 @@ func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.DB.Query(`
 		SELECT mp.match_id FROM match_players mp
 		JOIN matches m ON mp.match_id = m.id
-		WHERE mp.user_id = ? AND mp.active = 1 AND m.status != 'finished' AND m.creator_id != ?
+		WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished' AND m.creator_id != $2
 	`, userID, userID)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to leave matches"}`, http.StatusInternalServerError)
@@ -359,10 +359,10 @@ func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
 
 	// Get user name once
 	var userName string
-	database.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
+	database.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&userName)
 
 	for _, matchID := range matchIDs {
-		if _, err := database.DB.Exec("UPDATE match_players SET active = 0 WHERE match_id = ? AND user_id = ?", matchID, userID); err != nil {
+		if _, err := database.DB.Exec("UPDATE match_players SET active = FALSE WHERE match_id = $1 AND user_id = $2", matchID, userID); err != nil {
 			log.Printf("Error deactivating player %s from match %s: %v", userID, matchID, err)
 			continue
 		}
@@ -374,17 +374,17 @@ func LeaveAllMatches(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// End waiting matches where user is creator
-	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = ? AND status = 'waiting'", userID); err != nil {
+	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = $1 AND status = 'waiting'", userID); err != nil {
 		log.Printf("Error finishing creator matches for user %s: %v", userID, err)
 	}
 
 	// Also end playing matches where user is creator (orphan prevention)
-	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = ? AND status = 'playing'", userID); err != nil {
+	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE creator_id = $1 AND status = 'playing'", userID); err != nil {
 		log.Printf("Error finishing playing creator matches for user %s: %v", userID, err)
 	}
 
 	// Cancel pending invites
-	database.DB.Exec("UPDATE invites SET status = 'expired' WHERE target_user_id = ? AND status = 'pending'", userID)
+	database.DB.Exec("UPDATE invites SET status = 'expired' WHERE target_user_id = $1 AND status = 'pending'", userID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"message": "Left all matches"})
@@ -398,7 +398,7 @@ func GetActiveMatch(w http.ResponseWriter, r *http.Request) {
 	err := database.DB.QueryRow(`
 		SELECT mp.match_id FROM match_players mp
 		JOIN matches m ON mp.match_id = m.id
-		WHERE mp.user_id = ? AND mp.active = 1 AND m.status != 'finished'
+		WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished'
 		LIMIT 1
 	`, userID).Scan(&matchID)
 
@@ -436,7 +436,7 @@ func UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := database.DB.Exec("UPDATE users SET avatar = ? WHERE id = ?", reqBody.Avatar, userID)
+	result, err := database.DB.Exec("UPDATE users SET avatar = $1 WHERE id = $2", reqBody.Avatar, userID)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to update avatar"}`, http.StatusInternalServerError)
 		return

@@ -1,11 +1,32 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: adedanha-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-adedanha}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adedanha}
+      POSTGRES_DB: ${POSTGRES_DB:-adedanha}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-adedanha}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - adedanha-net
+
   backend:
     build:
       context: ./adedanha-golang
       dockerfile: Dockerfile
     container_name: adedanha-backend
-    volumes:
-      - sqlite-data:/app/data
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://adedanha:adedanha@db:5432/adedanha?sslmode=disable}
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - adedanha-net
@@ -16,7 +37,7 @@ services:
       dockerfile: Dockerfile
     container_name: adedanha-frontend
     ports:
-      - "80:80"
+      - "${PORT:-80}:80"
     depends_on:
       - backend
     restart: unless-stopped
@@ -24,7 +45,7 @@ services:
       - adedanha-net
 
 volumes:
-  sqlite-data:
+  postgres-data:
 
 networks:
   adedanha-net:

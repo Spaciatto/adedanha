@@ -32,8 +32,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func main() {
 	// Initialize database
-	dbPath := "./data/adedanha.db"
-	database.InitDB(dbPath)
+	database.InitDB()
 
 	// Initialize WebSocket hub
 	handlers.GameHub = handlers.NewHub()

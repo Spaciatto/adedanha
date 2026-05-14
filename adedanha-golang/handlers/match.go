@@ -43,7 +43,7 @@ func CreateMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var exists bool
-	if err := database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = ?)", req.CreatorID).Scan(&exists); err != nil || !exists {
+	if err := database.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)", req.CreatorID).Scan(&exists); err != nil || !exists {
 		http.Error(w, `{"error":"Creator user not found"}`, http.StatusNotFound)
 		return
 	}
@@ -53,7 +53,7 @@ func CreateMatch(w http.ResponseWriter, r *http.Request) {
 		SELECT EXISTS(
 			SELECT 1 FROM match_players mp
 			JOIN matches m ON mp.match_id = m.id
-			WHERE mp.user_id = ? AND mp.active = 1 AND m.status != 'finished'
+			WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished'
 		)`, req.CreatorID).Scan(&inActiveMatch); err != nil {
 		log.Printf("Error checking active match: %v", err)
 	}
@@ -78,7 +78,7 @@ func CreateMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err = tx.Exec(
-		"INSERT INTO matches (id, name, creator_id, status, current_round, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		"INSERT INTO matches (id, name, creator_id, status, current_round, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
 		match.ID, match.Name, match.CreatorID, match.Status, match.CurrentRound, match.CreatedAt,
 	); err != nil {
 		tx.Rollback()
@@ -87,7 +87,7 @@ func CreateMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err = tx.Exec(
-		"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES (?, ?, 1, ?)",
+		"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES ($1, $2, TRUE, $3) ON CONFLICT (match_id, user_id) DO NOTHING",
 		match.ID, req.CreatorID, time.Now(),
 	); err != nil {
 		tx.Rollback()
@@ -120,7 +120,7 @@ func JoinMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var status string
-	if err := database.DB.QueryRow("SELECT status FROM matches WHERE id = ?", matchID).Scan(&status); err != nil {
+	if err := database.DB.QueryRow("SELECT status FROM matches WHERE id = $1", matchID).Scan(&status); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
 	}
@@ -130,21 +130,21 @@ func JoinMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userName string
-	if err := database.DB.QueryRow("SELECT name FROM users WHERE id = ?", req.UserID).Scan(&userName); err != nil {
+	if err := database.DB.QueryRow("SELECT name FROM users WHERE id = $1", req.UserID).Scan(&userName); err != nil {
 		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
 		return
 	}
 
 	var alreadyJoined bool
 	database.DB.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM match_players WHERE match_id = ? AND user_id = ?)",
+		"SELECT EXISTS(SELECT 1 FROM match_players WHERE match_id = $1 AND user_id = $2)",
 		matchID, req.UserID,
 	).Scan(&alreadyJoined)
 
 	if alreadyJoined {
 		var isActive bool
 		database.DB.QueryRow(
-			"SELECT active FROM match_players WHERE match_id = ? AND user_id = ?",
+			"SELECT active FROM match_players WHERE match_id = $1 AND user_id = $2",
 			matchID, req.UserID,
 		).Scan(&isActive)
 
@@ -154,7 +154,7 @@ func JoinMatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Reactivate abandoned player
-		database.DB.Exec("UPDATE match_players SET active = 1 WHERE match_id = ? AND user_id = ?", matchID, req.UserID)
+		database.DB.Exec("UPDATE match_players SET active = TRUE WHERE match_id = $1 AND user_id = $2", matchID, req.UserID)
 		BroadcastToMatch(matchID, models.WSMessage{
 			Type:     "player_joined",
 			UserID:   req.UserID,
@@ -175,7 +175,7 @@ func JoinMatch(w http.ResponseWriter, r *http.Request) {
 		SELECT EXISTS(
 			SELECT 1 FROM match_players mp
 			JOIN matches m ON mp.match_id = m.id
-			WHERE mp.user_id = ? AND mp.active = 1 AND m.status != 'finished' AND mp.match_id != ?
+			WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished' AND mp.match_id != $2
 		)`, req.UserID, matchID).Scan(&inOtherMatch)
 	if inOtherMatch {
 		http.Error(w, `{"error":"Você já está em uma partida ativa. Abandone a partida atual antes de entrar em outra."}`, http.StatusConflict)
@@ -183,7 +183,7 @@ func JoinMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := database.DB.Exec(
-		"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES (?, ?, 1, ?)",
+		"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES ($1, $2, TRUE, $3) ON CONFLICT (match_id, user_id) DO NOTHING",
 		matchID, req.UserID, time.Now(),
 	); err != nil {
 		http.Error(w, `{"error":"User already in match or failed to join"}`, http.StatusConflict)
@@ -206,7 +206,7 @@ func GetMatch(w http.ResponseWriter, r *http.Request) {
 
 	var match models.Match
 	if err := database.DB.QueryRow(
-		"SELECT id, name, creator_id, status, current_round, created_at FROM matches WHERE id = ?", matchID,
+		"SELECT id, name, creator_id, status, current_round, created_at FROM matches WHERE id = $1", matchID,
 	).Scan(&match.ID, &match.Name, &match.CreatorID, &match.Status, &match.CurrentRound, &match.CreatedAt); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
@@ -215,7 +215,7 @@ func GetMatch(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.DB.Query(`
 		SELECT mp.match_id, mp.user_id, u.name, mp.active, mp.joined_at 
 		FROM match_players mp JOIN users u ON mp.user_id = u.id 
-		WHERE mp.match_id = ?`, matchID)
+		WHERE mp.match_id = $1`, matchID)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to get match players"}`, http.StatusInternalServerError)
 		return
@@ -240,7 +240,7 @@ func StartRound(w http.ResponseWriter, r *http.Request) {
 
 	var match models.Match
 	if err := database.DB.QueryRow(
-		"SELECT id, creator_id, status, current_round FROM matches WHERE id = ?", matchID,
+		"SELECT id, creator_id, status, current_round FROM matches WHERE id = $1", matchID,
 	).Scan(&match.ID, &match.CreatorID, &match.Status, &match.CurrentRound); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
@@ -263,11 +263,11 @@ func StartRound(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if match.Status == "waiting" {
-		database.DB.Exec("UPDATE matches SET status = 'playing' WHERE id = ?", matchID)
+		database.DB.Exec("UPDATE matches SET status = 'playing' WHERE id = $1", matchID)
 	}
 
 	// Get letters already used in this match
-	usedRows, err := database.DB.Query("SELECT letter FROM rounds WHERE match_id = ?", matchID)
+	usedRows, err := database.DB.Query("SELECT letter FROM rounds WHERE match_id = $1", matchID)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to check used letters"}`, http.StatusInternalServerError)
 		return
@@ -291,7 +291,7 @@ func StartRound(w http.ResponseWriter, r *http.Request) {
 
 	// If no letters available, end the match automatically
 	if len(availableLetters) == 0 {
-		database.DB.Exec("UPDATE matches SET status = 'finished' WHERE id = ?", matchID)
+		database.DB.Exec("UPDATE matches SET status = 'finished' WHERE id = $1", matchID)
 		ranking := calculateRanking(matchID)
 		BroadcastToMatch(matchID, models.WSMessage{
 			Type:    "match_ended",
@@ -328,7 +328,7 @@ func StartRound(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err = tx.Exec(
-		"INSERT INTO rounds (id, match_id, round_number, letter, status, started_at, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO rounds (id, match_id, round_number, letter, status, started_at, ends_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
 		round.ID, round.MatchID, round.RoundNumber, round.Letter, round.Status, round.StartedAt, round.EndsAt,
 	); err != nil {
 		tx.Rollback()
@@ -336,7 +336,7 @@ func StartRound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err = tx.Exec("UPDATE matches SET current_round = ? WHERE id = ?", newRoundNumber, matchID); err != nil {
+	if _, err = tx.Exec("UPDATE matches SET current_round = $1 WHERE id = $2", newRoundNumber, matchID); err != nil {
 		tx.Rollback()
 		http.Error(w, `{"error":"Failed to update match"}`, http.StatusInternalServerError)
 		return
@@ -381,7 +381,7 @@ func runRoundTimer(matchID, roundID string, endsAt time.Time) {
 	for {
 		select {
 		case <-stopCh:
-			database.DB.Exec("UPDATE rounds SET status = 'finished' WHERE id = ?", roundID)
+			database.DB.Exec("UPDATE rounds SET status = 'finished' WHERE id = $1", roundID)
 			BroadcastToMatch(matchID, models.WSMessage{
 				Type:    "round_ended",
 				RoundID: roundID,
@@ -390,7 +390,7 @@ func runRoundTimer(matchID, roundID string, endsAt time.Time) {
 		case <-ticker.C:
 			remaining := int(time.Until(endsAt).Seconds())
 			if remaining <= 0 {
-				database.DB.Exec("UPDATE rounds SET status = 'finished' WHERE id = ?", roundID)
+				database.DB.Exec("UPDATE rounds SET status = 'finished' WHERE id = $1", roundID)
 				BroadcastToMatch(matchID, models.WSMessage{
 					Type:    "round_ended",
 					RoundID: roundID,
@@ -409,14 +409,14 @@ func runRoundTimer(matchID, roundID string, endsAt time.Time) {
 func checkAllPlayersSubmitted(matchID, roundID string) {
 	var activePlayers int
 	if err := database.DB.QueryRow(
-		"SELECT COUNT(*) FROM match_players WHERE match_id = ? AND active = 1", matchID,
+		"SELECT COUNT(*) FROM match_players WHERE match_id = $1 AND active = TRUE", matchID,
 	).Scan(&activePlayers); err != nil {
 		return
 	}
 
 	var answersCount int
 	if err := database.DB.QueryRow(
-		"SELECT COUNT(*) FROM answers WHERE round_id = ?", roundID,
+		"SELECT COUNT(*) FROM answers WHERE round_id = $1", roundID,
 	).Scan(&answersCount); err != nil {
 		return
 	}
@@ -451,7 +451,7 @@ func SubmitAnswers(w http.ResponseWriter, r *http.Request) {
 
 	var roundStatus string
 	if err := database.DB.QueryRow(
-		"SELECT status FROM rounds WHERE id = ? AND match_id = ?", roundID, matchID,
+		"SELECT status FROM rounds WHERE id = $1 AND match_id = $2", roundID, matchID,
 	).Scan(&roundStatus); err != nil {
 		http.Error(w, `{"error":"Round not found"}`, http.StatusNotFound)
 		return
@@ -459,7 +459,7 @@ func SubmitAnswers(w http.ResponseWriter, r *http.Request) {
 
 	var playerExists bool
 	if err := database.DB.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM match_players WHERE match_id = ? AND user_id = ?)",
+		"SELECT EXISTS(SELECT 1 FROM match_players WHERE match_id = $1 AND user_id = $2)",
 		matchID, req.UserID,
 	).Scan(&playerExists); err != nil || !playerExists {
 		http.Error(w, `{"error":"User is not in this match"}`, http.StatusForbidden)
@@ -483,7 +483,7 @@ func SubmitAnswers(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := database.DB.Exec(
 		`INSERT INTO answers (id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at) 
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		 ON CONFLICT(round_id, user_id) DO UPDATE SET color=excluded.color, fruit=excluded.fruit, object=excluded.object, movie=excluded.movie, city=excluded.city, animal=excluded.animal, name=excluded.name, submitted_at=excluded.submitted_at`,
 		answer.ID, answer.RoundID, answer.UserID, answer.Color, answer.Fruit, answer.Object, answer.Movie, answer.City, answer.Animal, answer.Name, answer.Score, answer.SubmittedAt,
 	); err != nil {
@@ -519,7 +519,7 @@ func UpdateScores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var creatorID string
-	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = ?", matchID).Scan(&creatorID); err != nil {
+	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = $1", matchID).Scan(&creatorID); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
 	}
@@ -530,7 +530,7 @@ func UpdateScores(w http.ResponseWriter, r *http.Request) {
 
 	for _, score := range req.Scores {
 		if _, err := database.DB.Exec(
-			"UPDATE answers SET score = ? WHERE round_id = ? AND user_id = ?",
+			"UPDATE answers SET score = $1 WHERE round_id = $2 AND user_id = $3",
 			score.Score, roundID, score.UserID,
 		); err != nil {
 			log.Printf("Error updating score for user %s: %v", score.UserID, err)
@@ -560,7 +560,7 @@ func EndMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var creatorID string
-	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = ?", matchID).Scan(&creatorID); err != nil {
+	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = $1", matchID).Scan(&creatorID); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
 	}
@@ -569,7 +569,7 @@ func EndMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE id = ?", matchID); err != nil {
+	if _, err := database.DB.Exec("UPDATE matches SET status = 'finished' WHERE id = $1", matchID); err != nil {
 		http.Error(w, `{"error":"Failed to end match"}`, http.StatusInternalServerError)
 		return
 	}
@@ -594,7 +594,7 @@ func calculateRanking(matchID string) []models.RankingEntry {
 		FROM answers a
 		JOIN rounds r ON a.round_id = r.id
 		JOIN users u ON a.user_id = u.id
-		WHERE r.match_id = ?
+		WHERE r.match_id = $1
 		GROUP BY a.user_id, u.name
 		ORDER BY total_score DESC
 	`, matchID)
@@ -622,7 +622,7 @@ func GetMatchState(w http.ResponseWriter, r *http.Request) {
 
 	var match models.Match
 	if err := database.DB.QueryRow(
-		"SELECT id, name, creator_id, status, current_round, created_at FROM matches WHERE id = ?", matchID,
+		"SELECT id, name, creator_id, status, current_round, created_at FROM matches WHERE id = $1", matchID,
 	).Scan(&match.ID, &match.Name, &match.CreatorID, &match.Status, &match.CurrentRound, &match.CreatedAt); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
@@ -631,7 +631,7 @@ func GetMatchState(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.DB.Query(`
 		SELECT mp.match_id, mp.user_id, u.name, mp.active, mp.joined_at 
 		FROM match_players mp JOIN users u ON mp.user_id = u.id 
-		WHERE mp.match_id = ?`, matchID)
+		WHERE mp.match_id = $1`, matchID)
 	if err != nil {
 		http.Error(w, `{"error":"Failed to get match players"}`, http.StatusInternalServerError)
 		return
@@ -655,7 +655,7 @@ func GetMatchState(w http.ResponseWriter, r *http.Request) {
 		var round models.Round
 		err := database.DB.QueryRow(`
 			SELECT id, match_id, round_number, letter, status, started_at, ends_at
-			FROM rounds WHERE match_id = ? ORDER BY round_number DESC LIMIT 1`, matchID,
+			FROM rounds WHERE match_id = $1 ORDER BY round_number DESC LIMIT 1`, matchID,
 		).Scan(&round.ID, &round.MatchID, &round.RoundNumber, &round.Letter, &round.Status, &round.StartedAt, &round.EndsAt)
 		if err == nil {
 			state.CurrentRound = &round
@@ -664,7 +664,7 @@ func GetMatchState(w http.ResponseWriter, r *http.Request) {
 			} else {
 				state.Phase = "round_ended"
 				answerRows, err := database.DB.Query(
-					"SELECT id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at FROM answers WHERE round_id = ?",
+					"SELECT id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at FROM answers WHERE round_id = $1",
 					round.ID,
 				)
 				if err == nil {
@@ -708,7 +708,7 @@ func LeaveMatch(w http.ResponseWriter, r *http.Request) {
 
 	var playerActive bool
 	if err := database.DB.QueryRow(
-		"SELECT active FROM match_players WHERE match_id = ? AND user_id = ?",
+		"SELECT active FROM match_players WHERE match_id = $1 AND user_id = $2",
 		matchID, reqBody.UserID,
 	).Scan(&playerActive); err != nil {
 		http.Error(w, `{"error":"User is not in this match"}`, http.StatusNotFound)
@@ -716,14 +716,14 @@ func LeaveMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var creatorID string
-	database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = ?", matchID).Scan(&creatorID)
+	database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = $1", matchID).Scan(&creatorID)
 	if reqBody.UserID == creatorID {
 		http.Error(w, `{"error":"O criador não pode abandonar a partida. Encerre a partida ao invés disso."}`, http.StatusForbidden)
 		return
 	}
 
 	if _, err := database.DB.Exec(
-		"UPDATE match_players SET active = 0 WHERE match_id = ? AND user_id = ?",
+		"UPDATE match_players SET active = FALSE WHERE match_id = $1 AND user_id = $2",
 		matchID, reqBody.UserID,
 	); err != nil {
 		http.Error(w, `{"error":"Failed to leave match"}`, http.StatusInternalServerError)
@@ -731,7 +731,7 @@ func LeaveMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userName string
-	database.DB.QueryRow("SELECT name FROM users WHERE id = ?", reqBody.UserID).Scan(&userName)
+	database.DB.QueryRow("SELECT name FROM users WHERE id = $1", reqBody.UserID).Scan(&userName)
 
 	BroadcastToMatch(matchID, models.WSMessage{
 		Type:     "player_left",
@@ -746,7 +746,7 @@ func LeaveMatch(w http.ResponseWriter, r *http.Request) {
 func ListOpenMatches(w http.ResponseWriter, r *http.Request) {
 	rows, err := database.DB.Query(`
 		SELECT m.id, m.name, u.name, 
-			(SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.active = 1) as player_count,
+			(SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.id AND mp.active = TRUE) as player_count,
 			m.status
 		FROM matches m
 		JOIN users u ON m.creator_id = u.id
@@ -788,7 +788,7 @@ func RequestJoinMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var status string
-	if err := database.DB.QueryRow("SELECT status FROM matches WHERE id = ?", matchID).Scan(&status); err != nil {
+	if err := database.DB.QueryRow("SELECT status FROM matches WHERE id = $1", matchID).Scan(&status); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
 	}
@@ -802,7 +802,7 @@ func RequestJoinMatch(w http.ResponseWriter, r *http.Request) {
 		SELECT EXISTS(
 			SELECT 1 FROM match_players mp
 			JOIN matches m ON mp.match_id = m.id
-			WHERE mp.user_id = ? AND mp.active = 1 AND m.status != 'finished'
+			WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished'
 		)`, reqBody.UserID).Scan(&inOtherMatch)
 	if inOtherMatch {
 		http.Error(w, `{"error":"Você já está em uma partida ativa. Abandone a partida atual primeiro."}`, http.StatusConflict)
@@ -811,7 +811,7 @@ func RequestJoinMatch(w http.ResponseWriter, r *http.Request) {
 
 	var existingRequest bool
 	database.DB.QueryRow(
-		"SELECT EXISTS(SELECT 1 FROM join_requests WHERE match_id = ? AND user_id = ? AND status = 'pending')",
+		"SELECT EXISTS(SELECT 1 FROM join_requests WHERE match_id = $1 AND user_id = $2 AND status = 'pending')",
 		matchID, reqBody.UserID,
 	).Scan(&existingRequest)
 	if existingRequest {
@@ -820,14 +820,14 @@ func RequestJoinMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var userName string
-	if err := database.DB.QueryRow("SELECT name FROM users WHERE id = ?", reqBody.UserID).Scan(&userName); err != nil {
+	if err := database.DB.QueryRow("SELECT name FROM users WHERE id = $1", reqBody.UserID).Scan(&userName); err != nil {
 		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
 		return
 	}
 
 	requestID := uuid.New().String()
 	if _, err := database.DB.Exec(
-		"INSERT INTO join_requests (id, match_id, user_id, user_name, status, created_at) VALUES (?, ?, ?, ?, 'pending', ?)",
+		"INSERT INTO join_requests (id, match_id, user_id, user_name, status, created_at) VALUES ($1, $2, $3, $4, 'pending', $5)",
 		requestID, matchID, reqBody.UserID, userName, time.Now(),
 	); err != nil {
 		http.Error(w, `{"error":"Failed to create join request"}`, http.StatusInternalServerError)
@@ -859,7 +859,7 @@ func GetJoinRequests(w http.ResponseWriter, r *http.Request) {
 	matchID := vars["id"]
 
 	rows, err := database.DB.Query(
-		"SELECT id, match_id, user_id, user_name, status, created_at FROM join_requests WHERE match_id = ? AND status = 'pending' ORDER BY created_at ASC",
+		"SELECT id, match_id, user_id, user_name, status, created_at FROM join_requests WHERE match_id = $1 AND status = 'pending' ORDER BY created_at ASC",
 		matchID,
 	)
 	if err != nil {
@@ -895,7 +895,7 @@ func RespondJoinRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var creatorID string
-	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = ?", matchID).Scan(&creatorID); err != nil {
+	if err := database.DB.QueryRow("SELECT creator_id FROM matches WHERE id = $1", matchID).Scan(&creatorID); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
 	}
@@ -906,7 +906,7 @@ func RespondJoinRequest(w http.ResponseWriter, r *http.Request) {
 
 	var jr models.JoinRequest
 	if err := database.DB.QueryRow(
-		"SELECT id, match_id, user_id, user_name, status FROM join_requests WHERE id = ? AND match_id = ?",
+		"SELECT id, match_id, user_id, user_name, status FROM join_requests WHERE id = $1 AND match_id = $2",
 		requestID, matchID,
 	).Scan(&jr.ID, &jr.MatchID, &jr.UserID, &jr.UserName, &jr.Status); err != nil {
 		http.Error(w, `{"error":"Join request not found"}`, http.StatusNotFound)
@@ -919,10 +919,10 @@ func RespondJoinRequest(w http.ResponseWriter, r *http.Request) {
 
 	if reqBody.Accepted {
 		database.DB.Exec(
-			"INSERT OR IGNORE INTO match_players (match_id, user_id, active, joined_at) VALUES (?, ?, 1, ?)",
+			"INSERT INTO match_players (match_id, user_id, active, joined_at) VALUES ($1, $2, TRUE, $3) ON CONFLICT (match_id, user_id) DO NOTHING",
 			matchID, jr.UserID, time.Now(),
 		)
-		database.DB.Exec("UPDATE join_requests SET status = 'accepted' WHERE id = ?", requestID)
+		database.DB.Exec("UPDATE join_requests SET status = 'accepted' WHERE id = $1", requestID)
 
 		BroadcastToMatch(matchID, models.WSMessage{
 			Type:     "player_joined",
@@ -935,7 +935,7 @@ func RespondJoinRequest(w http.ResponseWriter, r *http.Request) {
 			MatchID: matchID,
 		})
 	} else {
-		database.DB.Exec("UPDATE join_requests SET status = 'rejected' WHERE id = ?", requestID)
+		database.DB.Exec("UPDATE join_requests SET status = 'rejected' WHERE id = $1", requestID)
 		BroadcastToGlobal(models.WSMessage{
 			Type:    "join_rejected",
 			UserID:  jr.UserID,
@@ -965,7 +965,7 @@ func InvitePlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var creatorID, matchName string
-	if err := database.DB.QueryRow("SELECT creator_id, name FROM matches WHERE id = ?", matchID).Scan(&creatorID, &matchName); err != nil {
+	if err := database.DB.QueryRow("SELECT creator_id, name FROM matches WHERE id = $1", matchID).Scan(&creatorID, &matchName); err != nil {
 		http.Error(w, `{"error":"Match not found"}`, http.StatusNotFound)
 		return
 	}
@@ -975,14 +975,14 @@ func InvitePlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var status string
-	database.DB.QueryRow("SELECT status FROM matches WHERE id = ?", matchID).Scan(&status)
+	database.DB.QueryRow("SELECT status FROM matches WHERE id = $1", matchID).Scan(&status)
 	if status != "waiting" {
 		http.Error(w, `{"error":"Match is not accepting new players"}`, http.StatusBadRequest)
 		return
 	}
 
 	var playerName string
-	if err := database.DB.QueryRow("SELECT name FROM users WHERE id = ?", reqBody.PlayerID).Scan(&playerName); err != nil {
+	if err := database.DB.QueryRow("SELECT name FROM users WHERE id = $1", reqBody.PlayerID).Scan(&playerName); err != nil {
 		http.Error(w, `{"error":"Player not found"}`, http.StatusNotFound)
 		return
 	}
@@ -992,7 +992,7 @@ func InvitePlayer(w http.ResponseWriter, r *http.Request) {
 		SELECT EXISTS(
 			SELECT 1 FROM match_players mp
 			JOIN matches m ON mp.match_id = m.id
-			WHERE mp.user_id = ? AND mp.active = 1 AND m.status != 'finished'
+			WHERE mp.user_id = $1 AND mp.active = TRUE AND m.status != 'finished'
 		)`, reqBody.PlayerID).Scan(&inActiveMatch)
 	if inActiveMatch {
 		http.Error(w, `{"error":"Jogador já está em uma partida ativa"}`, http.StatusConflict)
@@ -1000,11 +1000,11 @@ func InvitePlayer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var creatorName string
-	database.DB.QueryRow("SELECT name FROM users WHERE id = ?", creatorID).Scan(&creatorName)
+	database.DB.QueryRow("SELECT name FROM users WHERE id = $1", creatorID).Scan(&creatorName)
 
 	inviteID := uuid.New().String()
 	if _, err := database.DB.Exec(
-		"INSERT INTO invites (id, match_id, match_name, inviter_name, target_user_id, status, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+		"INSERT INTO invites (id, match_id, match_name, inviter_name, target_user_id, status, created_at) VALUES ($1, $2, $3, $4, $5, 'pending', $6)",
 		inviteID, matchID, matchName, creatorName, reqBody.PlayerID, time.Now(),
 	); err != nil {
 		log.Printf("Error persisting invite: %v", err)
@@ -1029,14 +1029,14 @@ func GetRoundResults(w http.ResponseWriter, r *http.Request) {
 
 	var letter string
 	if err := database.DB.QueryRow(
-		"SELECT letter FROM rounds WHERE id = ? AND match_id = ?", roundID, matchID,
+		"SELECT letter FROM rounds WHERE id = $1 AND match_id = $2", roundID, matchID,
 	).Scan(&letter); err != nil {
 		http.Error(w, `{"error":"Round not found"}`, http.StatusNotFound)
 		return
 	}
 
 	rows, err := database.DB.Query(
-		"SELECT id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at FROM answers WHERE round_id = ?",
+		"SELECT id, round_id, user_id, color, fruit, object, movie, city, animal, name, score, submitted_at FROM answers WHERE round_id = $1",
 		roundID,
 	)
 	if err != nil {

@@ -212,10 +212,10 @@ const (
 )
 
 func wikidataCheck(label string, categoryQID string) string {
-	// SPARQL ASK query: is there an item with this Portuguese label that is instance of category?
+	// SPARQL ASK query: is there an item with this Portuguese label that is instance of category$1
 	sparql := fmt.Sprintf(`ASK {
-		?item rdfs:label "%s"@pt .
-		?item wdt:P31/wdt:P279* wd:%s .
+		$2item rdfs:label "%s"@pt .
+		$1item wdt:P31/wdt:P279* wd:%s .
 	}`, strings.ToLower(label), categoryQID)
 
 	apiURL := fmt.Sprintf("https://query.wikidata.org/sparql?query=%s&format=json", url.QueryEscape(sparql))
@@ -315,14 +315,14 @@ func ValidateRound(w http.ResponseWriter, r *http.Request) {
 
 	var letter string
 	if err := database.DB.QueryRow(
-		"SELECT letter FROM rounds WHERE id = ? AND match_id = ?", roundID, matchID,
+		"SELECT letter FROM rounds WHERE id = $1 AND match_id = $2", roundID, matchID,
 	).Scan(&letter); err != nil {
 		http.Error(w, `{"error":"Round not found"}`, http.StatusNotFound)
 		return
 	}
 
 	rows, err := database.DB.Query(
-		"SELECT user_id, color, fruit, object, movie, city, animal, name FROM answers WHERE round_id = ?",
+		"SELECT user_id, color, fruit, object, movie, city, animal, name FROM answers WHERE round_id = $1",
 		roundID,
 	)
 	if err != nil {
