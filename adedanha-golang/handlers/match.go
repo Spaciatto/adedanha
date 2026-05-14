@@ -10,16 +10,14 @@ import (
 	"time"
 
 	"adedanha-golang/database"
+	"adedanha-golang/internal/domain"
 	"adedanha-golang/models"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
-var validLetters = []string{
-	"A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
-	"L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "Z",
-}
+var validLetters = domain.ValidLetters
 
 // roundStopChannels stores cancel channels for active round timers
 var roundStopChannels = make(map[string]chan struct{})
