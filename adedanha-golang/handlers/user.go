@@ -139,7 +139,7 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 
 	placeholders, args := buildPlaceholders(onlineIDs)
 	rows, err := database.DB.Query(`
-		SELECT id, name FROM users 
+		SELECT id, name, COALESCE(avatar, '') FROM users 
 		WHERE id IN (`+placeholders+`)
 		AND id NOT IN (
 			SELECT mp.user_id FROM match_players mp
@@ -155,7 +155,7 @@ func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
 	users := []domain.OnlineUser{}
 	for rows.Next() {
 		var u domain.OnlineUser
-		if rows.Scan(&u.ID, &u.Name) == nil {
+		if rows.Scan(&u.ID, &u.Name, &u.Avatar) == nil {
 			users = append(users, u)
 		}
 	}
@@ -331,7 +331,7 @@ func UploadAvatar(w http.ResponseWriter, r *http.Request) {
 
 func queryUsersByIDs(ids []string) ([]domain.OnlineUser, error) {
 	placeholders, args := buildPlaceholders(ids)
-	rows, err := database.DB.Query("SELECT id, name FROM users WHERE id IN ("+placeholders+")", args...)
+	rows, err := database.DB.Query("SELECT id, name, COALESCE(avatar, '') FROM users WHERE id IN ("+placeholders+")", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +340,7 @@ func queryUsersByIDs(ids []string) ([]domain.OnlineUser, error) {
 	var users []domain.OnlineUser
 	for rows.Next() {
 		var u domain.OnlineUser
-		if rows.Scan(&u.ID, &u.Name) == nil {
+		if rows.Scan(&u.ID, &u.Name, &u.Avatar) == nil {
 			users = append(users, u)
 		}
 	}

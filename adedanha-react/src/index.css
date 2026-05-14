@@ -585,8 +585,21 @@ button:disabled {
   border-radius: 50%;
   object-fit: cover;
   vertical-align: middle;
-  margin-right: 6px;
+  margin-right: 2px;
   border: 2px solid #e8dcc8;
+}
+
+.avatar-small-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #f4e8d1;
+  border: 2px solid #e8dcc8;
+  font-size: 0.9rem;
+  flex-shrink: 0;
 }
 
 /* Mobile responsive */

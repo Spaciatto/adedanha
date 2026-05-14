@@ -4,7 +4,7 @@ interface MatchLobbyProps {
   isCreator: boolean;
   loading: boolean;
   joinRequests: JoinRequest[];
-  availablePlayers: { id: string; name: string }[];
+  availablePlayers: { id: string; name: string; avatar: string }[];
   invitedPlayers: Record<string, boolean>;
   onStartRound: () => void;
   onRespondRequest: (requestId: string, accepted: boolean) => void;
@@ -52,6 +52,11 @@ function MatchLobby({
                 <div key={p.id} className="online-user-item">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <span className="online-dot"></span>
+                    {p.avatar ? (
+                      <img src={p.avatar} alt="" className="avatar-small" />
+                    ) : (
+                      <span className="avatar-small-placeholder">👤</span>
+                    )}
                     <span className="online-user-name">{p.name}</span>
                   </div>
                   <button

@@ -85,6 +85,7 @@ export interface RankingEntry {
 export interface OnlineUser {
   id: string;
   name: string;
+  avatar: string;
 }
 
 export interface MatchState {

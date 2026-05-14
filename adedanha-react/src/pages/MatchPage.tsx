@@ -27,7 +27,7 @@ function MatchPage({ user }: MatchPageProps) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
-  const [availablePlayers, setAvailablePlayers] = useState<{id: string; name: string}[]>([]);
+  const [availablePlayers, setAvailablePlayers] = useState<{id: string; name: string; avatar: string}[]>([]);
   const [invitedPlayers, setInvitedPlayers] = useState<Record<string, boolean>>({});
   const [validations, setValidations] = useState<Record<string, Record<string, string>>>({});
   const [validating, setValidating] = useState(false);
@@ -157,7 +157,7 @@ function MatchPage({ user }: MatchPageProps) {
     loadJoinRequests();
     const loadAvailable = () => {
       api.getAvailablePlayers().then((players: any) => {
-        const filtered = (players as {id: string; name: string}[]).filter(
+        const filtered = (players as {id: string; name: string; avatar: string}[]).filter(
           (p) => !match?.players?.some((mp) => mp.user_id === p.id)
         );
         setAvailablePlayers(filtered);

@@ -146,8 +146,15 @@ function Home({ user }: HomeProps) {
           <div className="online-users-list">
             {onlineUsers.map((u) => (
               <div key={u.id} className="online-user-item">
-                <span className="online-dot"></span>
-                <span className="online-user-name">{u.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span className="online-dot"></span>
+                  {u.avatar ? (
+                    <img src={u.avatar} alt="" className="avatar-small" />
+                  ) : (
+                    <span className="avatar-small-placeholder">👤</span>
+                  )}
+                  <span className="online-user-name">{u.name}</span>
+                </div>
               </div>
             ))}
           </div>

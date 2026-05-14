@@ -92,8 +92,9 @@ type OpenMatch struct {
 }
 
 type OnlineUser struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Avatar string `json:"avatar"`
 }
 
 type MatchState struct {
