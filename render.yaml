@@ -30,8 +30,5 @@ services:
         source: /ws/*
         destination: https://adedanha-backend.onrender.com/ws/*
       - type: rewrite
-        source: /adedanha/*
-        destination: /adedanha/*
-      - type: rewrite
         source: /*
         destination: /adedanha/index.html
