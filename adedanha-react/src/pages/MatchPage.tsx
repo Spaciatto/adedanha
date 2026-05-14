@@ -288,7 +288,14 @@ function MatchPage({ user }: MatchPageProps) {
     setError('');
     setLoading(true);
     try {
-      await api.startRound(matchId, user.id);
+      const result = await api.startRound(matchId, user.id) as any;
+      // If all letters were used, match ends automatically
+      if (result.finished) {
+        setPhase('finished');
+        if (result.ranking) {
+          setRanking(result.ranking);
+        }
+      }
     } catch (err: any) {
       setError(err.message || 'Erro ao iniciar rodada');
     } finally {

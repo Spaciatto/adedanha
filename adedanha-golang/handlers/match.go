@@ -266,7 +266,47 @@ func StartRound(w http.ResponseWriter, r *http.Request) {
 		database.DB.Exec("UPDATE matches SET status = 'playing' WHERE id = ?", matchID)
 	}
 
-	letter := validLetters[rand.Intn(len(validLetters))]
+	// Get letters already used in this match
+	usedRows, err := database.DB.Query("SELECT letter FROM rounds WHERE match_id = ?", matchID)
+	if err != nil {
+		http.Error(w, `{"error":"Failed to check used letters"}`, http.StatusInternalServerError)
+		return
+	}
+	usedLetters := make(map[string]bool)
+	for usedRows.Next() {
+		var l string
+		if usedRows.Scan(&l) == nil {
+			usedLetters[l] = true
+		}
+	}
+	usedRows.Close()
+
+	// Filter available letters
+	var availableLetters []string
+	for _, l := range validLetters {
+		if !usedLetters[l] {
+			availableLetters = append(availableLetters, l)
+		}
+	}
+
+	// If no letters available, end the match automatically
+	if len(availableLetters) == 0 {
+		database.DB.Exec("UPDATE matches SET status = 'finished' WHERE id = ?", matchID)
+		ranking := calculateRanking(matchID)
+		BroadcastToMatch(matchID, models.WSMessage{
+			Type:    "match_ended",
+			Ranking: ranking,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":  "Todas as letras foram usadas. Partida encerrada automaticamente.",
+			"ranking":  ranking,
+			"finished": true,
+		})
+		return
+	}
+
+	letter := availableLetters[rand.Intn(len(availableLetters))]
 	newRoundNumber := match.CurrentRound + 1
 	now := time.Now()
 	endsAt := now.Add(60 * time.Second)
