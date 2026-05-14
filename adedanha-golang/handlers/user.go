@@ -4,36 +4,32 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"regexp"
 	"time"
 
 	"adedanha-golang/database"
+	"adedanha-golang/internal/domain"
+	"adedanha-golang/internal/httputil"
 	"adedanha-golang/models"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
 
-var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+var emailRegex = domain.ValidateEmail
 
 func isValidEmail(email string) bool {
-	return emailRegex.MatchString(email)
+	return domain.ValidateEmail(email)
 }
 
 func CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
-	if req.Name == "" || req.Email == "" {
-		http.Error(w, `{"error":"Name and email are required"}`, http.StatusBadRequest)
-		return
-	}
-
-	if !isValidEmail(req.Email) {
-		http.Error(w, `{"error":"Invalid email format"}`, http.StatusBadRequest)
+	if err := domain.ValidateCreateUser(req.Name, req.Email); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
@@ -49,13 +45,11 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		user.ID, user.Name, user.Email, user.CreatedAt,
 	)
 	if err != nil {
-		http.Error(w, `{"error":"Failed to create user. Email may already exist."}`, http.StatusConflict)
+		httputil.RespondError(w, domain.ErrEmailExists)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(user)
+	httputil.RespondJSON(w, http.StatusCreated, user)
 }
 
 func UpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -166,13 +160,13 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Invalid request body"}`, http.StatusBadRequest)
+	if err := httputil.DecodeJSON(r, &req); err != nil {
+		httputil.RespondError(w, err)
 		return
 	}
 
 	if req.Email == "" {
-		http.Error(w, `{"error":"Email is required"}`, http.StatusBadRequest)
+		httputil.RespondError(w, domain.ErrEmailRequired)
 		return
 	}
 
@@ -180,12 +174,11 @@ func LoginUser(w http.ResponseWriter, r *http.Request) {
 	err := database.DB.QueryRow("SELECT id, name, email, avatar, created_at FROM users WHERE email = $1", req.Email).
 		Scan(&user.ID, &user.Name, &user.Email, &user.Avatar, &user.CreatedAt)
 	if err != nil {
-		http.Error(w, `{"error":"User not found"}`, http.StatusNotFound)
+		httputil.RespondError(w, domain.ErrUserNotFound)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	httputil.RespondJSON(w, http.StatusOK, user)
 }
 
 func GetAvailablePlayers(w http.ResponseWriter, r *http.Request) {
