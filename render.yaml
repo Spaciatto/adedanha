@@ -22,6 +22,10 @@ services:
     runtime: static
     buildCommand: cd adedanha-react && npm install && npm run build
     staticPublishPath: adedanha-react/dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=0, must-revalidate
     routes:
       - type: rewrite
         source: /api/*
@@ -31,4 +35,4 @@ services:
         destination: https://adedanha-backend.onrender.com/ws/*
       - type: rewrite
         source: /*
-        destination: /adedanha/index.html
+        destination: /index.html
