@@ -177,7 +177,7 @@ function AppContent({ user, onLogout, onUserUpdate }: { user: User; onLogout: ()
 
   return (
     <div className="container">
-      <h1>🎲 Adedanha Online</h1>
+      <h1>✏️ Adedanha</h1>
       <div className="nav-bar">
         <span className="user-info">
           {user.avatar && <img src={user.avatar} alt="" className="avatar-small" />}
@@ -245,7 +245,7 @@ function App() {
     return (
       <BrowserRouter basename="/adedanha">
         <div className="container">
-          <h1>🎲 Adedanha Online</h1>
+          <h1>✏️ Adedanha</h1>
           <Login onLogin={handleLogin} />
         </div>
       </BrowserRouter>
